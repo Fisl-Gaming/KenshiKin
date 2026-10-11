@@ -221,6 +221,7 @@ namespace
             std::map<uint32_t, WorldBox>::iterator w = g_boxes.find(id);
             return w == g_boxes.end() ? NULL : worldInventory(boxBuilding(w->second));
         }
+        if (kind == CONTAINER_GROUND_BAG) return ground_bagInventory(id);
         if (kind == CONTAINER_BACKPACK) { Character* c = chars_byNetId(id); return c ? safeBackpack(c) : NULL; }
         if (kind == CONTAINER_CHARACTER) { Character* c = chars_byNetId(id); return c ? c->inventory : NULL; }
         if (kind == CONTAINER_BUILDING) { Building* b = builds_byNetId(id); return b ? b->getInventory() : NULL; }
@@ -228,6 +229,7 @@ namespace
     }
     bool positionOf(uint8_t kind, uint32_t id, Ogre::Vector3& out)
     {
+        if (kind == CONTAINER_GROUND_BAG) return ground_itemPosition(id, out);
         if (kind == CONTAINER_CHARACTER || kind == CONTAINER_BACKPACK) { Character* c = chars_byNetId(id); if (c) { out = c->getPosition(); return true; } }
         if (kind == CONTAINER_BUILDING) { Building* b = builds_byNetId(id); if (b) { out = b->getPosition(); return true; } }
         if (kind == CONTAINER_WORLD)
@@ -949,6 +951,32 @@ namespace
         for (std::set<uint8_t>::iterator p = w.watchers.begin(); p != w.watchers.end(); ++p) g_session.sendTo(*p, MSG_INVENTORY, body);
     }
 
+    // Host: town containers asked for while their zone was not loaded here.
+    struct BoxWait { uint32_t id; uint8_t player; DWORD since; };
+    std::vector<BoxWait> g_boxWaits;
+    const DWORD BOX_WAIT_MS = 15000;
+    void serveBoxWaits(DWORD now)
+    {
+        for (size_t i = g_boxWaits.size(); i-- > 0;)
+        {
+            BoxWait& bw = g_boxWaits[i];
+            std::map<uint32_t, WorldBox>::iterator it = g_boxes.find(bw.id);
+            if (it == g_boxes.end()) { g_boxWaits.erase(g_boxWaits.begin() + i); continue; }
+            if (worldInventory(boxBuilding(it->second)))
+            {
+                it->second.watchers.insert(bw.player);
+                pushBox(bw.id, it->second, bw.player);
+                log("town container %s: loaded after %lu ms, content sent to %s", it->second.sid.c_str(), (unsigned long)(now - bw.since), playerName(bw.player).c_str());
+                g_boxWaits.erase(g_boxWaits.begin() + i);
+            }
+            else if (now - bw.since > BOX_WAIT_MS)
+            {
+                log("town container %s: still not loaded here after %lu s (its owner's copy stays empty)", it->second.sid.c_str(), (unsigned long)(BOX_WAIT_MS / 1000));
+                g_boxWaits.erase(g_boxWaits.begin() + i);
+            }
+        }
+    }
+
     // Host: a client opened / closed one.
     void onBoxEvent(const NetEvent& e)
     {
@@ -981,7 +1009,11 @@ namespace
         }
         if (!worldInventory(boxBuilding(w)))
         {
-            log("town container %s opened by %s: not loaded here", sid.c_str(), playerName(e.sender).c_str());
+            // Not loaded on our side: load its zone and hand the content over once it is there.
+            npcs_activateZoneAt(Ogre::Vector3(x, y, z));
+            BoxWait bw; bw.id = id; bw.player = e.sender; bw.since = GetTickCount();
+            if (g_boxWaits.size() < 64) g_boxWaits.push_back(bw);
+            log("town container %s opened by %s: not loaded here, loading its zone", sid.c_str(), playerName(e.sender).c_str());
             return;
         }
         w.watchers.insert(e.sender);
@@ -1045,7 +1077,7 @@ void items_onMessage(const NetEvent& e)
         uint32_t id = r.u32();
         InvItem d; d.read(r);
         if (!r.ok() || target != g_session.localId() || netIdOwner(id) != e.sender || !d.sanitize()) return;
-        if (action > UNDO_GIVE_BACK || kind > CONTAINER_WORLD) return;
+        if (action > UNDO_GIVE_BACK || kind > CONTAINER_GROUND_BAG) return;
         if (d.item == MONEY_ITEM) { if (kind == CONTAINER_CHARACTER) undoMoneyHere(e.sender, action, id, d.quantity); return; }
         applyUndo(e.sender, action, kind, id, d);
         return;
@@ -1075,6 +1107,7 @@ void items_tick(DWORD now)
     if (g_session.isHost() && now - g_lastBoxPush >= BOX_PUSH_MS)
     {
         g_lastBoxPush = now;
+        serveBoxWaits(now);
         for (std::map<uint32_t, WorldBox>::iterator it = g_boxes.begin(); it != g_boxes.end(); ++it)
             if (!it->second.watchers.empty()) pushBox(it->first, it->second, -1);
     }

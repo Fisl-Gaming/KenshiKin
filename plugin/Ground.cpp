@@ -210,6 +210,7 @@ namespace
     }
 
     bool isRemoteCopy(Item* it);
+    bool safeSetPos(Item* it, const Ogre::Vector3* p);
 
     void ownerScan(DWORD now)
     {
@@ -321,6 +322,8 @@ namespace
     void placeRemote(uint32_t id, Remote& r)
     {
         Character* ghost = chars_ghostNear(netIdOwner(id), r.pos, GHOST_DROP_RANGE);
+        bool exact = false;
+        if (!ghost && netIdOwner(id) == HOST_ID) { ghost = chars_anyNear(r.pos, 120.f); exact = ghost != NULL; }   // a world item of the host's ground
         if (!ghost) return;
         Item* it = create(r.desc);
         if (!it) { r.placed = true; r.ptr = NULL; log("ground: unknown item '%s' (missing mod?)", r.desc.item.c_str()); return; }
@@ -341,6 +344,7 @@ namespace
         if (!ok) { log("ground: could not drop %s for %08x", r.desc.item.c_str(), id); r.placed = true; r.ptr = NULL; return; }
         r.placed = true; r.ptr = it; r.h = hand(it);
         r.placedAt = GetTickCount(); r.dropPos = ghost->getPosition();
+        if ((exact || netIdOwner(id) == HOST_ID) && safeSetPos(it, &r.pos)) r.dropPos = r.pos;   // where it lies in the host's world
         Ogre::Vector3 at;
         bool onGround = safeOnGround(it, &at);
         log("ground: %s dropped by player %d placed (%08x) on ground %d at (%.1f,%.1f,%.1f), ghost at (%.1f,%.1f,%.1f)",
@@ -410,6 +414,196 @@ namespace
             if (item != r.ptr) { r.ptr = NULL; ++it; continue; }   // unloaded here: nothing to report
             g_remote.erase(it++);   // in some other inventory (NPC...): forget it
         }
+    }
+    // ------------------------------------------------------------------ KenshiKin: the host's ground
+    // Kenshi rolls loot at random in each world, so what lies on the ground (things NPCs dropped,
+    // items left in ruins...) differed from one player to the next; only players' own drops were
+    // shared. Now the host's ground is the shared one:
+    //  Host   : every second, the items lying around each client in the shared world are announced
+    //           to that client (MSG_GROUND_ITEM, host-owned ids), and tracked like the host's own
+    //           drops: picked up / gone -> MSG_GROUND_REMOVE to everybody, a client's pickup goes
+    //           through MSG_GROUND_TAKE as for any drop.
+    //  Client : such a copy is dropped by the nearest character and put at the host's exact spot
+    //           (Item::setPositionRotation). The client's own world items around its characters
+    //           (never its own drops, never copies) are removed once they are clearly not ours.
+    // Bags lying on the ground (dropped by a player or the world) also share their content while
+    // they lie there (CONTAINER_GROUND_BAG, Items.cpp): their owner sends it on change.
+    const DWORD WORLD_SCAN_MS = 1000, WORLD_PURGE_MS = 1000, BAG_PUSH_MS = 500;
+    const float WORLD_RADIUS = 80.f;          // host: around each of a client's characters
+    const float WORLD_MERGE = 50.f;
+    const float PURGE_RADIUS = 60.f;          // client: around our characters
+    const DWORD PURGE_AGE_MS = 10000;         // an item must be seen this long before it is judged
+    const DWORD OWN_LOSS_MEMORY_MS = 60000;   // ... and no item of its kind left one of ours near it
+    const float OWN_BASE_RADIUS = 150.f;      // ... and not near one of our own buildings
+    const size_t MAX_WORLD_ITEMS = 1500;
+    DWORD g_lastWorldScan = 0, g_lastPurge = 0, g_lastBagPush = 0;
+    long g_worldAnnounced = 0, g_worldPurged = 0;
+    std::map<uint32_t, std::set<uint8_t> > g_sentTo;   // host: world items -> clients that have them
+    std::map<uint32_t, uint32_t> g_bagHash;            // our bags on the ground: content last sent
+    std::vector<Loss> g_recentLosses;                  // client: what left our characters lately (60 s)
+    std::map<Item*, Seen> g_purgeSeen;                 // client: world items around us, since when
+
+    bool safeSetPos(Item* it, const Ogre::Vector3* p)
+    {
+        __try { it->setPositionRotation(*p, Ogre::Quaternion::IDENTITY, false); return true; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
+    void sendItemTo(uint8_t client, uint32_t id, const Mine& m)
+    {
+        ByteWriter w; w.u32(id); m.desc.write(w); w.f32(m.pos.x); w.f32(m.pos.y); w.f32(m.pos.z);
+        if (!m.contents.empty())
+        {
+            w.u8(1); w.u16((uint16_t)m.contents.size());
+            for (size_t i = 0; i < m.contents.size(); ++i) m.contents[i].write(w);
+        }
+        g_session.sendTo(client, MSG_GROUND_ITEM, w.data);
+    }
+
+    void hostWorldScan(DWORD now)
+    {
+        std::set<Item*> mine;
+        for (std::map<uint32_t, Mine>::iterator m = g_mine.begin(); m != g_mine.end(); ++m) mine.insert(m->second.ptr);
+        size_t worldCount = g_sentTo.size();
+        std::vector<PlayerInfo> players = g_session.players();
+        for (size_t p = 0; p < players.size(); ++p)
+        {
+            uint8_t client = players[p].id;
+            if (client == HOST_ID || npcs_clientOwnWorld(client)) continue;
+            std::vector<Ogre::Vector3> chars, centres;
+            cs_ghostPositions(client, chars);
+            for (size_t i = 0; i < chars.size(); ++i)
+            {
+                bool covered = false;
+                for (size_t k = 0; k < centres.size() && !covered; ++k) covered = centres[k].distance(chars[i]) < WORLD_MERGE;
+                if (!covered) centres.push_back(chars[i]);
+            }
+            int fresh = 0;
+            for (size_t c = 0; c < centres.size(); ++c)
+            {
+                lektor<RootObject*> found;
+                if (!safeNear(&centres[c], WORLD_RADIUS, &found)) continue;
+                for (uint32_t k = 0; k < found.size(); ++k)
+                {
+                    hand h(found[k]);
+                    Item* it = h.getItem();
+                    Ogre::Vector3 pos;
+                    if (!it || isRemoteCopy(it) || !safeOnGround(it, &pos)) continue;
+                    std::map<Item*, Seen>::iterator s = g_seen.find(it);
+                    if (s != g_seen.end() && now - s->second.firstSeen < DROP_WINDOW_MS) continue;   // maybe our own fresh drop
+                    uint32_t id = 0;
+                    if (mine.count(it))
+                    {
+                        for (std::map<uint32_t, Mine>::iterator m = g_mine.begin(); m != g_mine.end(); ++m)
+                            if (m->second.ptr == it) { id = m->first; break; }
+                        if (!g_sentTo.count(id)) continue;   // our own drop: already announced to everybody
+                    }
+                    else
+                    {
+                        if (worldCount >= MAX_WORLD_ITEMS || fresh >= 64) continue;
+                        InvItem d = describe(it);
+                        if (!d.sanitize()) continue;
+                        Mine m; m.h = h; m.ptr = it; m.desc = d; m.pos = pos; m.contents = bagContents(it);
+                        id = makeNetId(HOST_ID, g_nextMine++ & 0x7FFFFF);
+                        g_mine[id] = m;
+                        g_sentTo[id];
+                        mine.insert(it);
+                        g_seen.erase(it);
+                        ++worldCount; ++fresh; ++g_worldAnnounced;
+                    }
+                    std::set<uint8_t>& sent = g_sentTo[id];
+                    if (sent.insert(client).second) sendItemTo(client, id, g_mine[id]);
+                }
+            }
+        }
+        static DWORD lastLog = 0;
+        static long lastCount = 0;
+        if (g_worldAnnounced != lastCount && now - lastLog > 30000)
+        { lastLog = now; log("ground: %ld world item(s) of the host shared so far (%u tracked)", g_worldAnnounced, (unsigned)g_sentTo.size()); lastCount = g_worldAnnounced; }
+    }
+
+    // Client: the nearest character drops the copy, then it is put at the host's spot.
+    Character* anyCharacterNear(const Ogre::Vector3& pos, float range)
+    {
+        return chars_anyNear(pos, range);
+    }
+
+    // Client: our world's own items around us (not ours, not copies) go.
+    void clientPurge(DWORD now)
+    {
+        for (size_t i = g_recentLosses.size(); i-- > 0;)
+            if (now - g_recentLosses[i].at > OWN_LOSS_MEMORY_MS) g_recentLosses.erase(g_recentLosses.begin() + i);
+        for (size_t i = 0; i < g_losses.size(); ++i)
+        {
+            bool known = false;
+            for (size_t k = 0; k < g_recentLosses.size() && !known; ++k)
+                known = g_recentLosses[k].at == g_losses[i].at && g_recentLosses[k].key == g_losses[i].key;
+            if (!known) g_recentLosses.push_back(g_losses[i]);
+        }
+        std::vector<std::pair<uint32_t, Character*> > locals;
+        chars_localCharacters(locals);
+        std::set<Item*> mine;
+        for (std::map<uint32_t, Mine>::iterator m = g_mine.begin(); m != g_mine.end(); ++m) mine.insert(m->second.ptr);
+        std::vector<Ogre::Vector3> base;   // our own buildings: what we keep on the floor there is ours
+        builds_localPositions(base);
+        int removed = 0;
+        std::set<Item*> seenNow;
+        for (size_t i = 0; i < locals.size(); ++i)
+        {
+            if (!locals[i].second) continue;
+            Ogre::Vector3 p = locals[i].second->getPosition();
+            lektor<RootObject*> found;
+            if (!safeNear(&p, PURGE_RADIUS, &found)) continue;
+            for (uint32_t k = 0; k < found.size(); ++k)
+            {
+                hand h(found[k]);
+                Item* it = h.getItem();
+                Ogre::Vector3 pos;
+                if (!it || mine.count(it) || isRemoteCopy(it) || !safeOnGround(it, &pos)) continue;
+                seenNow.insert(it);
+                std::map<Item*, Seen>::iterator s = g_purgeSeen.find(it);
+                if (s == g_purgeSeen.end() || s->second.h.getItem() != it) { Seen sn; sn.h = h; sn.firstSeen = now; g_purgeSeen[it] = sn; continue; }
+                if (now - s->second.firstSeen < PURGE_AGE_MS) continue;
+                InvItem d = describe(it);
+                if (!d.sanitize()) continue;
+                std::string key = itemKindKey(d);
+                bool ownLoss = false;
+                for (size_t l = 0; l < g_recentLosses.size() && !ownLoss; ++l)
+                    ownLoss = g_recentLosses[l].key == key && g_recentLosses[l].where.distance(pos) < DROP_RADIUS * 3;
+                if (ownLoss) continue;   // could be ours after all: never destroy what we may have dropped
+                bool atBase = false;
+                for (size_t b = 0; b < base.size() && !atBase; ++b) atBase = base[b].distance(pos) < OWN_BASE_RADIUS;
+                if (atBase) continue;
+                ++g_itemsMute; ++g_itemsEpoch;
+                bool ok = safeDestroy(it);
+                --g_itemsMute;
+                if (ok) { ++removed; ++g_worldPurged; g_purgeSeen.erase(it); seenNow.erase(it); }
+            }
+        }
+        for (std::map<Item*, Seen>::iterator s = g_purgeSeen.begin(); s != g_purgeSeen.end();)
+            if (!seenNow.count(s->first)) g_purgeSeen.erase(s++); else ++s;
+        static DWORD lastLog = 0;
+        if (removed && now - lastLog > 30000) { lastLog = now; log("ground: %ld item(s) of our own world removed (the host's ground is shown)", g_worldPurged); }
+    }
+
+    // Our bags on the ground (drops and, on the host, world items): their content to the others.
+    void pushBags(DWORD now)
+    {
+        for (std::map<uint32_t, Mine>::iterator m = g_mine.begin(); m != g_mine.end(); ++m)
+        {
+            Inventory* bag = safeBagInventory(m->second.ptr);
+            if (!bag || m->second.h.getItem() != m->second.ptr) continue;
+            Bytes body = items_inventoryMsg(CONTAINER_GROUND_BAG, m->first, bag);
+            uint32_t h = hashBytes(body);
+            std::map<uint32_t, uint32_t>::iterator old = g_bagHash.find(m->first);
+            if (old != g_bagHash.end() && old->second == h) continue;
+            g_bagHash[m->first] = h;
+            std::map<uint32_t, std::set<uint8_t> >::iterator to = g_sentTo.find(m->first);
+            if (to == g_sentTo.end()) g_session.send(MSG_INVENTORY, body);   // our drop: everybody has it
+            else for (std::set<uint8_t>::iterator c = to->second.begin(); c != to->second.end(); ++c) g_session.sendTo(*c, MSG_INVENTORY, body);
+        }
+        for (std::map<uint32_t, uint32_t>::iterator it = g_bagHash.begin(); it != g_bagHash.end();)
+            if (!g_mine.count(it->first)) g_bagHash.erase(it++); else ++it;
     }
 }
 
@@ -529,6 +723,32 @@ void ground_tick(DWORD now)
     last = now;
     ownerScan(now);
     remoteScan(now);
+    if (g_cfg.worldGround && g_cfg.townSync && ready())
+    {
+        if (g_session.isHost() && now - g_lastWorldScan >= WORLD_SCAN_MS) { g_lastWorldScan = now; hostWorldScan(now); }
+        if (!g_session.isHost() && !npcs_ownWorld() && now - g_lastPurge >= WORLD_PURGE_MS) { g_lastPurge = now; clientPurge(now); }
+    }
+    if (ready() && now - g_lastBagPush >= BAG_PUSH_MS) { g_lastBagPush = now; pushBags(now); }
+    for (std::map<uint32_t, std::set<uint8_t> >::iterator it = g_sentTo.begin(); it != g_sentTo.end();)
+        if (!g_mine.count(it->first)) g_sentTo.erase(it++); else ++it;
+}
+
+Inventory* ground_bagInventory(uint32_t id)
+{
+    std::map<uint32_t, Mine>::iterator m = g_mine.find(id);
+    if (m != g_mine.end()) return m->second.h.getItem() == m->second.ptr ? safeBagInventory(m->second.ptr) : NULL;
+    std::map<uint32_t, Remote>::iterator r = g_remote.find(id);
+    if (r != g_remote.end() && r->second.placed && r->second.ptr && r->second.h.getItem() == r->second.ptr) return safeBagInventory(r->second.ptr);
+    return NULL;
+}
+
+bool ground_itemPosition(uint32_t id, Ogre::Vector3& out)
+{
+    std::map<uint32_t, Mine>::iterator m = g_mine.find(id);
+    if (m != g_mine.end()) return m->second.h.getItem() == m->second.ptr && safeOnGround(m->second.ptr, &out);
+    std::map<uint32_t, Remote>::iterator r = g_remote.find(id);
+    if (r != g_remote.end()) { out = r->second.pos; return true; }
+    return false;
 }
 
 void ground_onMessage(const NetEvent& e)
@@ -610,6 +830,8 @@ void ground_resendAll()
 
 void ground_onPlayerLeft(uint8_t id)
 {
+    // Host: what it had of our ground goes with it (it gets it again when it comes back near).
+    for (std::map<uint32_t, std::set<uint8_t> >::iterator it = g_sentTo.begin(); it != g_sentTo.end(); ++it) it->second.erase(id);
     // Its drops stay in its own world; our copies go.
     for (std::map<uint32_t, Remote>::iterator it = g_remote.begin(); it != g_remote.end();)
     {
@@ -630,6 +852,10 @@ void ground_onWorldReload()
     g_losses.clear();
     g_gains.clear();
     g_lastContent.clear();
+    g_sentTo.clear();
+    g_bagHash.clear();
+    g_recentLosses.clear();
+    g_purgeSeen.clear();
 }
 
 } // namespace kmp

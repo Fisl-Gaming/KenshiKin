@@ -426,6 +426,8 @@ namespace
     }
 }
 
+bool npcs_activateZoneAt(const Ogre::Vector3& pos) { return safeActivateZone(&pos); }
+
 uint32_t npcs_netIdOf(Character* c)
 {
     Lock l;

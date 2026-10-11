@@ -17,7 +17,7 @@
 namespace mp {
 
 // KenshiKin (fork of KenshiMP): 1000 + upstream protocol, so the two never join each other.
-const uint32_t PROTOCOL_VERSION = 1022;
+const uint32_t PROTOCOL_VERSION = 1023;
 
 // World NPCs replicated by the host use the upper half of the host's local id space.
 const uint32_t NPC_ID_FLAG = 0x800000;
@@ -338,7 +338,8 @@ struct ItemRef
 // Container kinds of MSG_INVENTORY / MSG_ITEM_*.
 enum { CONTAINER_CHARACTER = 0, CONTAINER_BUILDING = 1, CONTAINER_BACKPACK = 2,   // BACKPACK: id = the wearer's net id
        CONTAINER_GROUND = 3,                                                       // MSG_ITEM_UNDO only: id = ground item
-       CONTAINER_WORLD = 4 };                                                      // town container of the host's world: id = host-owned
+       CONTAINER_WORLD = 4,                                                        // town container of the host's world: id = host-owned
+       CONTAINER_GROUND_BAG = 5 };                                                 // a bag lying on the ground: id = that ground item                                                      // town container of the host's world: id = host-owned
                                                                                    // (top byte 0, NPC bit clear), chosen by the client
 // MSG_ITEM_UNDO actions: what the requester must do to its own characters.
 enum { UNDO_REMOVE = 0,     // it took something the owner did not give up: remove it again

@@ -4,6 +4,17 @@ Players on different versions cannot play together (the host refuses the connect
 network protocol number (`PROTOCOL_VERSION` in `core/Protocol.h`), shown in the Multiplayer window title.
 KenshiMP's own history is in [docs/upstream-kenshimp/CHANGELOG.md](docs/upstream-kenshimp/CHANGELOG.md).
 
+## v1023
+
+- **The host's ground is shared:** items lying on the ground in the host's world around a client (NPC drops,
+  items in ruins) are shown to that client at the same spot and can be picked up like any drop; the client's
+  own randomly rolled ground loot around its characters is removed (never near its own buildings, never
+  what it dropped itself). `world_ground=1`.
+- **Bags on the ground** share their content while they lie there: what one player takes or puts in is
+  validated by the bag's owner and seen by everybody.
+- **Town containers whose zone the host has not loaded** are loaded by the host and their content is sent
+  once they are there (was: an empty container).
+
 ## v1022 — first public release
 
 Built on KenshiMP v18. Changes:

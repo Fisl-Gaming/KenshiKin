@@ -1908,6 +1908,17 @@ void chars_onRegroup(uint8_t who, uint8_t target)
     chat_notice(TF("%s joined %s.", playerName(who).c_str(), to.c_str()));
 }
 
+Character* chars_anyNear(const Ogre::Vector3& pos, float maxDist)
+{
+    Character* best = NULL;
+    float bestD = maxDist;
+    for (size_t i = 0; i < g_local.size(); ++i)
+        if (Character* c = g_local[i].h.getCharacter()) { float d = c->getPosition().distance(pos); if (d <= bestD) { bestD = d; best = c; } }
+    for (std::map<uint32_t, Ghost>::iterator it = g_ghosts.begin(); it != g_ghosts.end(); ++it)
+        if (Character* c = it->second.h.getCharacter()) { float d = c->getPosition().distance(pos); if (d <= bestD) { bestD = d; best = c; } }
+    return best;
+}
+
 Character* chars_ghostNear(uint8_t owner, const Ogre::Vector3& pos, float maxDist)
 {
     Character* best = NULL;

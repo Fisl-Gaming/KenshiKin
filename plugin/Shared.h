@@ -55,6 +55,7 @@ struct Config
     bool doorSync;         // host's town doors and gates (open / closed / locked) apply to everybody
     bool theftSync;        // host: a client's theft from the host's world is judged by the host's NPCs
     bool shareLogs;        // client: its log lines go to the host's log / console
+    bool worldGround;      // the host's ground items are shown to clients, a client's own world items around it go
     bool hostConsole;      // host: the console window outside the game opens when hosting starts
     int backupSaves;       // host: backups kept per save (copied when a hosted game is ready), 0 = off
     std::string autotestLoad;  // test: save loaded automatically from the title screen
@@ -64,7 +65,7 @@ struct Config
                relation(0), ghostAI("none"), syncAppearance(true), syncEquipment(true), syncBuildings(true),
                debugKeys(false), npcSync(true), strictMods(true), autoReconnect(true), pauseSync(true),
                renderSmoothing(true), weatherSync(true), lobbyKey(VK_F4), lobbyKeyName("F4"), language("auto"), playersOnMap(true),
-               tuneSpeedMatch(true), tuneTrail(true), tuneRepath(true), tuneUnblock(true), tuneOnScreen(true), ghostNoCollide(false), loadSharing(false), assaultHostility(false), playerNames(true), townSync(true), blockPopulate(false), doorSync(true), theftSync(true), shareLogs(true), hostConsole(true), backupSaves(5), autotest(false) {}
+               tuneSpeedMatch(true), tuneTrail(true), tuneRepath(true), tuneUnblock(true), tuneOnScreen(true), ghostNoCollide(false), loadSharing(false), assaultHostility(false), playerNames(true), townSync(true), blockPopulate(false), doorSync(true), theftSync(true), shareLogs(true), worldGround(true), hostConsole(true), backupSaves(5), autotest(false) {}
 };
 
 extern mp::Session g_session;
@@ -167,6 +168,11 @@ bool npcs_clientOwnWorld(uint8_t client); // host: that client simulates its own
 bool items_install();
 void items_allOf(Inventory* inv, std::vector<Item*>& out);   // KenshiKin: every item of an inventory
 void items_onLocalTheft(Character* thief, RootObject* from, GameData* item, bool noticed);   // main thread
+Inventory* ground_bagInventory(uint32_t id);                    // a bag lying on the ground (ours or a copy)
+bool ground_itemPosition(uint32_t id, Ogre::Vector3& out);
+Character* chars_anyNear(const Ogre::Vector3& pos, float maxDist);   // any character here (ours or a copy)
+bool npcs_activateZoneAt(const Ogre::Vector3& pos);             // host: load the zone at that spot
+void builds_localPositions(std::vector<Ogre::Vector3>& out);   // our own (player) buildings
 // KenshiKin: engine hooks may run on Kenshi's worker threads; they only post what happened here
 // (handles are taken at once) and chars_tick handles it on the main thread.
 enum { HOOK_CARRY_UP = 1, HOOK_CARRY_DOWN, HOOK_TREAT, HOOK_THEFT };

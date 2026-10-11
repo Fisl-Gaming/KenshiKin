@@ -47,6 +47,7 @@ What this fork adds or fixes compared with KenshiMP v18:
 | Knock-outs and deaths | only the owner decides; a copy never falls, stays down or gets up on its own |
 | Carrying bodies | whoever lifts a downed player (a friend or the host's NPCs) carries the real body in the owner's world too |
 | Healing | first aid and doctoring on another player's character reach the real one |
+| Loot on the ground | what lies on the ground in the host's world (NPC drops, items in ruins) is the same for everybody; bags on the ground share their content; a town container whose zone the host has not loaded is loaded for you |
 | Posture, beds, cages | crawling, playing dead, in a bed, in a cage, on a prisoner pole — the same everywhere |
 | Thefts and crimes | stealing from a town container, lockpicking, trespassing or assault in the host's world is seen by the host's NPCs, who react; crimes between players are left to the players |
 | Diagnostics | clients' log lines arrive in the host's log; host console window outside the game; RESYNC button |
@@ -86,6 +87,10 @@ Things you may run into, most likely first:
 - **Each player still has their own world.** Only what is listed above is shared. Anything else can differ
   between players (for example the contents of containers in your own base, or what a client's own
   simulation does far from the host with `load_sharing=1`).
+- **A client's own ground loot is replaced by the host's.** Kenshi rolls loot at random in each world, so
+  around a client's characters the items lying on the ground in its own world are removed and the host's
+  are shown (`world_ground=1`). Items near the client's own buildings and anything it dropped itself are
+  never removed.
 - **Different mods = different worlds.** A missing furniture or item mod on one player's side shows up as
   missing chairs, NPCs standing instead of sitting, or items that cannot be created. Use the same mod list.
 - **Guards react to a theft after a delay** (10–20 s in our tests): the crime is set at once, but the

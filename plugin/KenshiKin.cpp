@@ -195,6 +195,7 @@ namespace
             else if (k == "door_sync") g_cfg.doorSync = toBool(v);
             else if (k == "theft_sync") g_cfg.theftSync = toBool(v);
             else if (k == "share_logs") g_cfg.shareLogs = toBool(v);
+            else if (k == "world_ground") g_cfg.worldGround = toBool(v);
             else if (k == "host_console") g_cfg.hostConsole = toBool(v);
             else if (k == "backup_saves") { int n = atoi(v.c_str()); g_cfg.backupSaves = n < 0 ? 0 : (n > 50 ? 50 : n); }
             else if (k == "player_names") g_cfg.playerNames = toBool(v);

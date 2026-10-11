@@ -304,6 +304,13 @@ uint32_t builds_netIdOf(Building* b)
     return localIdOf(b);
 }
 
+void builds_localPositions(std::vector<Ogre::Vector3>& out)
+{
+    Lock l;
+    for (size_t i = 0; i < g_local.size(); ++i)
+        if (Building* b = g_local[i].h.getBuilding()) out.push_back(b->getPosition());
+}
+
 Building* builds_byNetId(uint32_t id)
 {
     Lock l;

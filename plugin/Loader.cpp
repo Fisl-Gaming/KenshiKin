@@ -1,18 +1,18 @@
-// KenshiMP_Loader.dll: starts KenshiMP without RE_Kenshi.
+// KenshiKin_Loader.dll: starts KenshiKin without RE_Kenshi.
 //
 // Kenshi's interface library (MyGUI) loads the plugins listed in its settings files and calls their
 // dllStartPlugin(); the mod's gui\core\core_settings.xml lists this loader (Kenshi reads the gui
-// folder of every enabled mod), so ticking KenshiMP in the launcher is enough. The same entry point
+// folder of every enabled mod), so ticking KenshiKin in the launcher is enough. The same entry point
 // also works from Ogre's Plugins_x64.cfg. The loader then:
-//  1. does nothing if RE_Kenshi is in the game (RE_Kenshi starts KenshiMP itself, RE_Kenshi.json);
+//  1. does nothing if RE_Kenshi is in the game (RE_Kenshi starts KenshiKin itself, RE_Kenshi.json);
 //  2. recognises the executable (MD5): the stock Steam 1.0.68 build uses the address table shipped
-//     with KenshiMP (rva\RE_Kenshi\RVAs\Steam_1.0.65.br, made by matching the 1.0.65 functions in
+//     with KenshiKin (rva\RE_Kenshi\RVAs\Steam_1.0.65.br, made by matching the 1.0.65 functions in
 //     the 1.0.68 executable - see tools/README.md); a 1.0.65 build uses RE_Kenshi's own tables;
 //  3. loads the KenshiLib.dll next to it, hands it that table (KenshiLib reads
 //     "RE_Kenshi/RVAs/<platform>_<version>.br" from the current folder, so the loader points the
-//     current folder at its rva folder while KenshiLib::Init runs), then loads KenshiMP.dll and
+//     current folder at its rva folder while KenshiLib::Init runs), then loads KenshiKin.dll and
 //     calls its startPlugin().
-// Anything unexpected: a line in KenshiMP_loader.log (game folder) and the game starts without
+// Anything unexpected: a line in KenshiKin_loader.log (game folder) and the game starts without
 // multiplayer - never a crash.
 #include <windows.h>
 #include <wincrypt.h>
@@ -28,7 +28,7 @@ namespace
     FILE* g_log = NULL;
     void log(const char* fmt, ...)
     {
-        if (!g_log) fopen_s(&g_log, "KenshiMP_loader.log", "w");
+        if (!g_log) fopen_s(&g_log, "KenshiKin_loader.log", "w");
         if (!g_log) return;
         SYSTEMTIME t; GetLocalTime(&t);
         fprintf(g_log, "%02d:%02d:%02d ", t.wHour, t.wMinute, t.wSecond);
@@ -103,19 +103,25 @@ namespace
     {
         if (GetModuleHandleW(L"RE_Kenshi.dll"))
         {
-            log("RE_Kenshi is loaded: it starts KenshiMP itself, nothing to do here.");
+            log("RE_Kenshi is loaded: it starts KenshiKin itself, nothing to do here.");
             return;
         }
         // Started once only: the loader can be reached twice (MyGUI plugin list of the mod's
         // gui folder and Plugins_x64.cfg, or a local copy and the Workshop copy).
+        if (GetModuleHandleW(L"KenshiKin.dll"))
+        {
+            log("KenshiKin is already started (another copy of the loader), nothing to do here.");
+            return;
+        }
+        // KenshiKin is a fork of KenshiMP: both hook the same engine functions, never run them together.
         if (GetModuleHandleW(L"KenshiMP.dll"))
         {
-            log("KenshiMP is already started (another copy of the loader), nothing to do here.");
+            log("KenshiMP is running: untick it in the launcher to play KenshiKin. KenshiKin not started.");
             return;
         }
         std::wstring dir = moduleDir();
         std::string md5 = exeMd5();
-        log("KenshiMP loader in %s, game executable md5 %s", narrow(dir).c_str(), md5.c_str());
+        log("KenshiKin loader in %s, game executable md5 %s", narrow(dir).c_str(), md5.c_str());
 
         // Known builds. The stock Steam build is only supported through our own table.
         const char* STEAM_1068 = "8a03c256f0da1555d9cceb939b41530a";
@@ -124,7 +130,7 @@ namespace
         bool ours = md5 == STEAM_1068;
         if (!ours && md5 != STEAM_1065 && md5 != GOG_1065)
         {
-            log("This Kenshi build is not supported without RE_Kenshi (Steam 1.0.68 or 1.0.65 only). Install RE_Kenshi to play KenshiMP.");
+            log("This Kenshi build is not supported without RE_Kenshi (Steam 1.0.68 or 1.0.65 only). Install RE_Kenshi to play KenshiKin.");
             return;
         }
         std::wstring table = dir + L"\\rva\\RE_Kenshi\\RVAs\\Steam_1.0.65.br";
@@ -146,17 +152,17 @@ namespace
         bool ok = safeInit(ours);
         SetCurrentDirectoryW(cwd);
         if (!ok) { log("KenshiLib could not start (address table)."); return; }
-        log("KenshiLib ready (%s table)", ours ? "KenshiMP's Steam 1.0.68" : "RE_Kenshi's 1.0.65");
+        log("KenshiLib ready (%s table)", ours ? "KenshiKin's Steam 1.0.68" : "RE_Kenshi's 1.0.65");
 
-        std::wstring mp = dir + L"\\KenshiMP.dll";
+        std::wstring mp = dir + L"\\KenshiKin.dll";
         HMODULE m = LoadLibraryExW(mp.c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
         if (!m) { log("cannot load %s (error %lu)", narrow(mp).c_str(), GetLastError()); return; }
         StartPluginFn f = (StartPluginFn)GetProcAddress(m, "?startPlugin@@YAXXZ");
-        if (!f) { log("KenshiMP.dll has no startPlugin"); return; }
-        log(safeStart(f) ? "KenshiMP started" : "KenshiMP startPlugin failed");
+        if (!f) { log("KenshiKin.dll has no startPlugin"); return; }
+        log(safeStart(f) ? "KenshiKin started" : "KenshiKin startPlugin failed");
     }
 }
 
-// Ogre plugin entry points (Plugins_x64.cfg: Plugin=<folder>/KenshiMP_Loader).
+// Ogre plugin entry points (Plugins_x64.cfg: Plugin=<folder>/KenshiKin_Loader).
 extern "C" __declspec(dllexport) void dllStartPlugin() { start(); }
 extern "C" __declspec(dllexport) void dllStopPlugin() {}

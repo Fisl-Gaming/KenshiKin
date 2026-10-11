@@ -1,88 +1,136 @@
-# KenshiMP — co-op multiplayer plugin for Kenshi
+# KenshiKin
 
-Each player owns his squad, faction, buildings and towns (own simulation). Other players' entities
-show up as ghosts. Damage is sent to the *owner* of the victim, who applies it. Host also runs the
-shared world. Fast-forward is locked to x1.
+**Co-op and PvP multiplayer for Kenshi** — a fork of [xemou/KenshiMP](https://github.com/xemou/KenshiMP) that
+focuses on keeping the players' worlds in sync: sneaking, knock-outs, carrying bodies, healing, thefts, town
+doors and gates, beds and cages.
 
-## Layout
-- `core/` – engine-independent networking (TCP star topology, host relays). VS2010-compatible C++.
-  - `Protocol.h` message types & structs, `Session.h/.cpp` host/client, `Buffer.h` serialisation.
-- `tests/` – `build_and_run.bat` builds & runs the loopback test (host + 2 clients) with any modern MSVC.
-- `plugin/` – RE_Kenshi plugin (`KenshiMP.dll`), must be built with the **VS2010 (v100)** toolset.
-- `kenshimp.cfg` – mode=host|join, address, port, name, faction.
+[Русская версия](README.ru.md)
 
-## Status
-- [x] Network core, tested (handshake, relay, targeted damage, disconnect, ping)
-- [x] Plugin skeleton: config, main-loop hook, x1 speed lock, position broadcast of selected character
-- [x] Build plugin with a portable VC++ 2010 x64 toolchain (`package.bat` -> `dist\KenshiMP\`)
-- [x] Ghost squads: every player character is announced (EntitySpawn, template stringID) and
-      streamed at 10 Hz; remote ones are spawned in a per-player local faction and walk/teleport
-- [x] Damage routing: hits on a ghost (HealthPartStatus::applyDamage hook) are sent to the owner
-- [x] Faction war/peace between players: F9 = war, F10 = peace, `relation=` in cfg for the default
-- [x] Ghost AI suppression (AI::periodicUpdate skipped for ghosts, `ghost_ai=none|full`)
-- [x] Appearance sync (appearance GameData copied key by key, then AppearanceBase::reload)
-- [x] Equipment sync (equipped weapons + armour recreated from item/manufacturer/material ids)
-- [x] Buildings/towns (createBuilding hook on player faction, construction progress, removal)
-- [x] Risky engine calls wrapped in SEH (logged instead of crashing)
-- [x] Tested in game (Steam 1.0.68 + RE_Kenshi 0.3.5) against `tests/bot.exe` (fake 2nd player):
-      ghost spawn + appearance + gear, movement, war (F9), melee on a ghost routed to its owner,
-      incoming damage applied, building replication both ways. No crash.
-- [x] Complete ghosts (protocol v3): per-body-part health + blood, KO/death, stats/skills,
-      walk/jog/run, real combat (same target, engine animations), whitelisted tasks
-      (build, operate machines, turrets, beds, sit...)
-- [x] Damage authority: attacker's machine computes, victim's owner applies; ghost blows on
-      replicated characters play with zero damage (Character::hitByMeleeAttack), ghost
-      projectiles filtered via GunClass::shoot; verified in game (no double damage)
-- [x] Buildings: destroyed flag, door states (broken/locked), door hits and dismantling of
-      ghost buildings routed to the owner
-- [x] Stale ghosts from previous sessions purged from loaded saves (factions kenshimp_player_N)
-- [x] World clock: host is authoritative; clock found at runtime from getTimeStamp_inGameHours
-      (day int + sky hour float), verified in game
-- [x] Alt-tab: only exclusive fullscreen pauses; borderless/windowed keeps running
-- [x] World NPC sync (protocol v4): host replicates NPCs/animals within 600 units of each client
-      (real faction, full ghost pipeline, delta-compressed states); clients' own population is
-      switched off (squad spawns, town residents blocked; leftovers removed with GameWorld::destroy)
-      — host side verified in game with the bot; client side partially verified (replay)
-- [x] Robustness (protocol v5, offline-tested in tests/net_test.cpp): 15 s timeouts, backlog caps,
-      version + mod-list handshake, input sanitisation, ghost caps, auto-reconnect, disconnect
-      cleanup, world-reload detection (pointer caches dropped, purge, MSG_RESYNC), no world ops
-      before a world is loaded
-- [x] Gameplay safety: host-owned pause, client saves redirected to "<name>_MP", faction-standing
-      table synced to mirror factions, NPC recruitment = ownership transfer (player chars blocked),
-      host keeps zones loaded around remote players, hotkeys only when the game has focus
-- [ ] Items/containers/trading, weather, production, carrying bodies, chat UI (see GUIDE.md §7)
+> **Status: beta.** Played by a group of three friends on Steam 1.0.68. Many things work, some are only
+> tested offline, and you will meet bugs — see [Known issues](#known-issues). Back up your saves (the host
+> does it automatically, see `backup_saves`).
 
-See [GUIDE.md](GUIDE.md) for install, config, troubleshooting, known limits and anticipated risks, [RISKS.md](RISKS.md) for the multiplayer risk register and [ROADMAP.md](ROADMAP.md) for what is left to do.
+## How this mod is made
 
-## Known setup pitfalls (fixed on this machine)
-- Plugin must be built with /GL + /LTCG (else KenshiLib::GetRealAddress asserts, game crashes).
-- RE_Kenshi's downgraded exe lives in `Kenshi\RE_Kenshi\`: copy the PhysX DLLs
-  (PhysXCore64, PhysXCooking64, PhysXDevice64, PhysXLoader64, physxcudart_20, cudart64_30_9,
-  NxCharacter) next to it, and install NVIDIA PhysX System Software 9.10.0513, otherwise
-  "PhysX start failure" when starting a game.
+**Every change KenshiKin makes on top of KenshiMP was written by an AI** — Claude (Anthropic), working
+through Claude Code. No person wrote or edited the code of this fork. People did the rest: they chose what to
+fix, played the test sessions, and sent the logs when something broke; the AI read the logs, the engine
+headers (KenshiLib) and other open co-op mods, and wrote the fixes.
 
-## Testing without a second PC
-`tests\build_bot.bat`, then run `tests\out\bot.exe 127.0.0.1 47000 600 4` while hosting: the bot
-joins as player 1 and mirrors your squad/buildings back 4 m away, logs every DAMAGE it receives
-and sends a 5 blunt hit to your characters after 60 s.
+What that means for you:
 
-## Building the plugin
-`package.bat` builds with the VC++ 2010 x64 compilers extracted (msiexec /a, no install) from the
-Windows SDK 7.1 ISO into `deps\vc2010`, KenshiLib headers from `deps\KenshiLib\Include`, libs from
-`deps\KenshiLib_Examples_deps\KenshiLib\Libraries` (KenshiLib.lib v0.5.1) and Boost 1.60.
+- The fixes rest on what could be learned about Kenshi's engine from headers, logs and other projects, not on
+  Lo-Fi Games' source code. Some of them are educated guesses that turned out right in play; some are not
+  tested in play yet (marked below).
+- Every risky engine call is guarded (SEH): when something does not work on your game build, that feature
+  switches itself off and writes a line in the log instead of crashing the game.
+- The base mod, KenshiMP, is the work of its own authors (see [NOTICE.md](NOTICE.md)).
 
-## Installing
-1. Copy `dist\KenshiMP\` into `[Kenshi]\mods\` (or subscribe on the Steam Workshop).
-2. Enable KenshiMP in the launcher's Mods tab. That is all: nothing to run, no game file changed.
-   The game itself starts KenshiMP through the mod's `gui\core\core_settings.xml` (see
-   [tools/README.md](tools/README.md)). With RE_Kenshi (`deps\re_release\RE_Kenshi_installer.exe`,
-   needed on GOG) it is the same.
+## What you get
 
-## Documentation
-- [GUIDE.md](GUIDE.md) - install, usage, options, troubleshooting, limits
-- [RISKS.md](RISKS.md) - multiplayer risk register
-- [ROADMAP.md](ROADMAP.md) - roadmap
+- **Everyone keeps their own squad, faction, base and towns.** Other players' characters appear as live
+  copies: movement, combat, equipment, injuries, lost limbs, prosthetics, names above their heads.
+- **The host's world is shared:** NPCs and animals around each player, time of day, weather, pause, town
+  states (destroyed or taken towns, dead uniques), broken doors, town chests.
+- **Player relations:** war, peace and alliance per player; direct trading in the game's trade window.
+- **Steam first:** join through a Steam invitation from the title screen, no IP or port forwarding needed
+  (direct IP / VPN also works).
 
-## License
+What this fork adds or fixes compared with KenshiMP v18:
 
-GPLv3 (see [LICENSE](LICENSE)), like KenshiLib which the plugin depends on.
+| | |
+|---|---|
+| Sneaking | other players see you crouch |
+| Furniture and lights | towns a client loads while connected are no longer empty and dark |
+| Bars and town life | NPCs sit on their stools and beds as on the host |
+| Doors and gates | open / closed / locked as in the host's world; a lockpicked door opens for the host too |
+| Knock-outs and deaths | only the owner decides; a copy never falls, stays down or gets up on its own |
+| Carrying bodies | whoever lifts a downed player (a friend or the host's NPCs) carries the real body in the owner's world too |
+| Healing | first aid and doctoring on another player's character reach the real one |
+| Posture, beds, cages | crawling, playing dead, in a bed, in a cage, on a prisoner pole — the same everywhere |
+| Thefts and crimes | stealing from a town container, lockpicking, trespassing or assault in the host's world is seen by the host's NPCs, who react; crimes between players are left to the players |
+| Diagnostics | clients' log lines arrive in the host's log; host console window outside the game; RESYNC button |
+| Performance | lighter per-frame work for ghosts and replicated NPCs |
+
+## Install (every player)
+
+1. Download `KenshiKin_vXXXX.zip` from [Releases](../../releases) and unzip it into `Kenshi\mods\`, so that
+   you get `Kenshi\mods\KenshiKin\KenshiKin.dll`.
+2. In the Kenshi launcher, **Mods** tab: tick **KenshiKin**, untick **KenshiMP** if you have it. They cannot run together.
+3. Everybody needs the **same KenshiKin release** and **the same mod list in the same order**; the host
+   refuses anything else and says what differs.
+
+Requirements: Kenshi on Steam (1.0.68, as Steam installs it), or GOG / 1.0.65 with
+[RE_Kenshi](https://www.nexusmods.com/kenshi/mods/847). Borderless window mode is recommended (exclusive
+fullscreen pauses the game on Alt+Tab).
+
+## Play
+
+- **Host:** title screen → **MULTIPLAYER** (or F4 in game) → **HOST**, then **STEAM FRIENDS → INVITE**.
+  Start a new game or continue.
+- **Friends:** accept the Steam invitation (or "Join game" on the host's profile), then **NEW GAME** (a fresh
+  game is best) or **CONTINUE**. **GO TO** (or `/goto`) in the Multiplayer window brings your squad to the host.
+- **Without Steam:** ADVANCED SETTINGS → host address, port (TCP 47000 by default), password.
+- **Chat:** Enter. Commands: `/players`, `/war`, `/peace`, `/ally <player|all>`, `/goto [player]`,
+  `/resync [all|player]`, `/console` (host), `/report`.
+- **Host console:** a window outside the game (minimised in the taskbar when you host) with the players, the
+  live log of everyone and commands (`players`, `resync all`, `resync <name>`, `say <text>`).
+
+Client saves go to `<name>_MP`; your own single-player saves are never touched.
+Settings: `%LOCALAPPDATA%\kenshi\KenshiKin\kenshikin.cfg` (every option is explained in the file).
+
+## Known issues
+
+Things you may run into, most likely first:
+
+- **Each player still has their own world.** Only what is listed above is shared. Anything else can differ
+  between players (for example the contents of containers in your own base, or what a client's own
+  simulation does far from the host with `load_sharing=1`).
+- **Different mods = different worlds.** A missing furniture or item mod on one player's side shows up as
+  missing chairs, NPCs standing instead of sitting, or items that cannot be created. Use the same mod list.
+- **Guards react to a theft after a delay** (10–20 s in our tests): the crime is set at once, but the
+  host's NPCs still have to notice it and come.
+- **Guards do not recognise a wanted friend on sight.** Kenshi only checks bounties of the player faction;
+  other players' characters live in their own factions. Crimes caught in the act work.
+- **Not tested in play yet:** beds and cages, posture (crawling, playing dead), healing another player,
+  lockpicking reports, the host console window. They are built and tested offline; please report what you see.
+- **Ranged combat:** a copy fires its own arrow when its owner fires, so the arrow's path can differ
+  (the damage is always the owner's).
+- **Internet play over TCP:** on a bad connection, characters can stutter or catch up in jumps. Steam or a
+  gaming VPN (Radmin, ZeroTier, Tailscale) helps.
+- **The host leaving ends the session** for everybody (no host migration).
+- **Fast-forward is locked to x1** while connected.
+- Up to 8 players; tested with 3.
+
+When something breaks: the host's `Kenshi\RE_Kenshi_log.txt` now holds everybody's lines (`[name] ...`).
+Open an issue with that file and a short description of what you saw.
+
+## Build from source
+
+The plugin must be built with the **Visual C++ 2010 x64** toolchain (KenshiLib requires it). Put these next
+to the repository, in `..\deps\`:
+
+| Folder | What |
+|---|---|
+| `deps\vc2010\` | the VC++ 2010 x64 compilers and the Windows SDK 7.1, extracted with `msiexec /a` from the Windows SDK 7.1 ISO (`GRMSDKX_EN_DVD.iso`: `Setup\vc_stdamd64`, `Setup\vc_stdx86`, `Setup\WinSDKBuild_amd64`) — nothing is installed |
+| `deps\KenshiLib\` | [KenshiLib](https://github.com/BFrizzleFoShizzle/KenshiLib) headers |
+| `deps\KenshiLib_Examples_deps\` | [KenshiLib_Examples_deps](https://github.com/BFrizzleFoShizzle/KenshiLib_Examples_deps) (git LFS: libs, Boost 1.60 — unzip `boost.zip`) |
+| `deps\KenshiLib_Examples\` | [KenshiLib_Examples](https://github.com/BFrizzleFoShizzle/KenshiLib_Examples) (the empty `HelloWorld.mod`) |
+| `deps\re_release\install\KenshiLib.dll` | the KenshiLib.dll built with RE_Kenshi 0.3.5 |
+
+Then `plugin\build.bat` builds the DLLs and `package.bat` assembles `dist\KenshiKin\`.
+`tests\build_and_run.bat` (or the same `cl` line with the VC2010 toolchain) runs the offline network tests.
+
+## License and credits
+
+GPL-3.0, like KenshiMP and KenshiLib (see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md)).
+
+- [xemou/KenshiMP](https://github.com/xemou/KenshiMP) — the mod this fork is built on; its original
+  documentation is in [docs/upstream-kenshimp](docs/upstream-kenshimp).
+- [KenshiLib / RE_Kenshi](https://github.com/BFrizzleFoShizzle) — engine access.
+- Approaches learned from [nhoral/KenshiCoop](https://github.com/nhoral/KenshiCoop),
+  [Melaus123/Shared-Wastelands](https://github.com/Melaus123/Shared-Wastelands) and
+  [LRaverdy/KenshiCoop](https://github.com/LRaverdy/KenshiCoop) (re-implemented, no code copied).
+
+KenshiKin is an unofficial fan project, not affiliated with Lo-Fi Games, with the KenshiMP authors, or with
+Anthropic. *Kenshi* is a trademark of Lo-Fi Games.

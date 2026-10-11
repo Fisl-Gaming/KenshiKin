@@ -91,7 +91,7 @@ namespace kmp {
 bool world_install()
 {
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&SaveManager::save), save_hook, &save_orig))
-        ErrorLog("KenshiMP: could not hook SaveManager::save (client saves are not redirected)");
+        ErrorLog("KenshiKin: could not hook SaveManager::save (client saves are not redirected)");
 
     const unsigned char* f = (const unsigned char*)KenshiLib::GetRealAddress(&GameWorld::getTimeStamp_inGameHours);
     // 48 8B 05 rel32        mov rax, [rip+rel32]
@@ -106,7 +106,7 @@ bool world_install()
         log("world clock located (holder %p, offset 0x%x)", g_clockHolder, disp);
         return true;
     }
-    ErrorLog("KenshiMP: world clock not found, time sync disabled");
+    ErrorLog("KenshiKin: world clock not found, time sync disabled");
     return false;
 }
 

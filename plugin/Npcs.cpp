@@ -68,6 +68,7 @@ namespace
     {
         if (a.flags != b.flags || a.moveSpeed != b.moveSpeed || a.task != b.task) return false;
         if (a.combatTarget != b.combatTarget || a.taskSubject != b.taskSubject) return false;
+        if (a.body != b.body || a.furniture != b.furniture) return false;   // KenshiKin: posture, bed / cage
         float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
         if (dx * dx + dy * dy + dz * dz > 0.05f * 0.05f) return false;
         if (fabsf(a.qw - b.qw) > 0.01f || fabsf(a.qy - b.qy) > 0.01f) return false;
@@ -76,6 +77,7 @@ namespace
         return true;
     }
     std::map<Character*, Npc> g_npcs;        // host only (g_lock for lookups from hooks)
+    std::map<uint32_t, Character*> g_npcById; // KenshiKin: net id -> key of g_npcs, kept with it (g_lock)
     uint32_t g_nextNpc = 1;
     DWORD g_lastState = 0, g_lastScan = 0, g_lastLooks = 0, g_lastCleanup = 0;
     bool g_purgedAll = false;
@@ -243,6 +245,7 @@ namespace
             for (std::set<uint8_t>::iterator c = it->second.clients.begin(); c != it->second.clients.end(); ++c)
                 sendDespawnTo(*c, it->second.id);
             Lock l;
+            g_npcById.erase(it->second.id);
             g_npcs.erase(it++);
         }
 
@@ -295,6 +298,7 @@ namespace
                     Npc n; n.h = hand(*w); n.ptr = *w; n.id = makeNetId(HOST_ID, NPC_ID_FLAG | (g_nextNpc++ & 0x7FFFFF));
                     Lock l;
                     it = g_npcs.insert(std::make_pair(*w, n)).first;
+                    g_npcById[n.id] = *w;
                 }
                 float d = nearest((*w)->getPosition(), centres);
                 if (d < it->second.nearestPlayer) it->second.nearestPlayer = d;
@@ -327,11 +331,13 @@ namespace
             if (it->second.clients.empty()) continue;
             Character* c = it->second.h.getCharacter();
             if (c != it->first) continue;
-            EntityState s;
-            cs_captureState(c, it->second.id, s);
             DWORD now = GetTickCount();
             Npc& n = it->second;
+            // KenshiKin: rate check first; the full capture (health of every body part, task, target)
+            // was made for every tracked NPC 20 times a second and mostly thrown away.
             if (n.everSent && now - n.lastSentAt < lodPeriod(n.nearestPlayer)) continue;
+            EntityState s;
+            cs_captureState(c, it->second.id, s);
             if (n.everSent && now - n.lastSentAt < STATE_REFRESH_MS && nearlySame(s, n.lastSent)) continue;
             n.lastSent = s; n.lastSentAt = now; n.everSent = true;
             ByteWriter one; s.write(one);
@@ -430,9 +436,10 @@ uint32_t npcs_netIdOf(Character* c)
 Character* npcs_byNetId(uint32_t id)
 {
     Lock l;
-    for (std::map<Character*, Npc>::iterator it = g_npcs.begin(); it != g_npcs.end(); ++it)
-        if (it->second.id == id) return it->second.h.getCharacter();
-    return NULL;
+    std::map<uint32_t, Character*>::iterator k = g_npcById.find(id);
+    if (k == g_npcById.end()) return NULL;
+    std::map<Character*, Npc>::iterator it = g_npcs.find(k->second);
+    return it == g_npcs.end() || it->second.id != id ? NULL : it->second.h.getCharacter();
 }
 
 void npcs_tick(DWORD now)
@@ -464,6 +471,7 @@ void npcs_onClaim(uint8_t client, const Bytes& body)
         Lock l;
         for (std::map<Character*, Npc>::iterator it = g_npcs.begin(); it != g_npcs.end(); ++it)
             if (it->second.id == id) { c = it->first; n = it->second; g_npcs.erase(it); break; }
+        g_npcById.erase(id);
     }
     if (!c) return;
     // The claimer must actually be next to that NPC (recruiting happens face to face).
@@ -474,6 +482,7 @@ void npcs_onClaim(uint8_t client, const Bytes& body)
         {
             Lock l;
             g_npcs[c] = n;                   // not handed over: keep replicating it
+            g_npcById[n.id] = c;
             log("refused NPC claim %08x from %s (not next to it)", id, playerName(client).c_str());
             return;
         }
@@ -491,6 +500,7 @@ void npcs_reset()
 {
     Lock l;
     g_npcs.clear();
+    g_npcById.clear();
     g_looksCursor = NULL;
     g_purgedAll = false;
     g_clientMode.clear();
@@ -552,10 +562,14 @@ void charForBuilding_hook(RootObjectFactory* self, Building* b)
     if (suppressLocalWorld()) return;
     charForBuilding_orig(self, b);
 }
+// KenshiKin: populateBuilding apparently also lays out a building's interior (furniture, lights): blocking it
+// left the towns a client loaded while connected empty and dark, and the host's seated NPCs had no
+// chair to sit on there. Residents it may still create are removed by clientCleanup() around us.
+// block_building_populate=1 restores the upstream behaviour.
 void (*populate_orig)(RootObjectFactory*, Building*) = NULL;
 void populate_hook(RootObjectFactory* self, Building* b)
 {
-    if (suppressLocalWorld()) return;
+    if (g_cfg.blockPopulate && suppressLocalWorld()) return;
     populate_orig(self, b);
 }
 
@@ -564,11 +578,11 @@ bool npcs_install()
 {
     bool ok = true;
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(FactionAccess::address()), spawnSquad_hook, &spawnSquad_orig))
-    { ErrorLog("KenshiMP: could not hook Faction::_spawnASquad!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook Faction::_spawnASquad!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&RootObjectFactory::createCharacterForBuilding), charForBuilding_hook, &charForBuilding_orig))
-    { ErrorLog("KenshiMP: could not hook createCharacterForBuilding!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook createCharacterForBuilding!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&RootObjectFactory::populateBuilding), populate_hook, &populate_orig))
-    { ErrorLog("KenshiMP: could not hook populateBuilding!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook populateBuilding!"); ok = false; }
     return ok;
 }
 }

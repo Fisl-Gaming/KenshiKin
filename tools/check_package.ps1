@@ -1,13 +1,13 @@
-# Checks dist\KenshiMP before a Workshop upload (run by package.bat; can also be run alone).
+# Checks dist\KenshiKin before a release (run by package.bat; can also be run alone).
 # Exit code 0 = ready, 1 = something to fix (listed).
-param([string]$Dir = "$PSScriptRoot\..\dist\KenshiMP")
+param([string]$Dir = "$PSScriptRoot\..\dist\KenshiKin")
 $problems = @()
 $Dir = (Resolve-Path $Dir -ErrorAction SilentlyContinue)
 if (-not $Dir) { Write-Host "check: package folder not found (run package.bat)"; exit 1 }
 
 # 1. Files players need (see NOTICE.md / RELEASE_CHECKLIST.md)
-$required = 'KenshiMP.dll', 'KenshiMP.mod', 'RE_Kenshi.json', 'kenshimp.cfg', 'KenshiMP_Loader.dll', 'KenshiLib.dll',
-            'rva\RE_Kenshi\RVAs\Steam_1.0.65.br', 'gui\core\core_settings.xml', 'README.md', 'GUIDE.md', 'GUIDE_FR.md', 'RISKS.md', 'LICENSE', 'NOTICE.md'
+$required = 'KenshiKin.dll', 'KenshiKin.mod', 'RE_Kenshi.json', 'kenshikin.cfg', 'KenshiKin_Loader.dll', 'KenshiLib.dll',
+            'rva\RE_Kenshi\RVAs\Steam_1.0.65.br', 'gui\core\core_settings.xml', 'README.md', 'README.ru.md', 'CHANGELOG.md', 'LICENSE', 'NOTICE.md'
 foreach ($f in $required) { if (-not (Test-Path (Join-Path $Dir $f))) { $problems += "missing: $f" } }
 
 # 2. Nothing from the game or RE_Kenshi is redistributed
@@ -19,7 +19,7 @@ Get-ChildItem $Dir -Recurse -File | ForEach-Object {
 }
 
 # 3. Default settings: never ship a test or host/join setup
-$cfgPath = Join-Path $Dir 'kenshimp.cfg'
+$cfgPath = Join-Path $Dir 'kenshikin.cfg'
 if (Test-Path $cfgPath) {
     $cfg = @{}
     Get-Content $cfgPath | ForEach-Object {
@@ -28,39 +28,38 @@ if (Test-Path $cfgPath) {
     }
     $expected = @{ 'mode' = 'off'; 'debug_keys' = '0'; 'load_sharing' = '0'; 'ghost_no_collide' = '0' }
     foreach ($k in $expected.Keys) {
-        if ($cfg.ContainsKey($k) -and $cfg[$k] -ne $expected[$k]) { $problems += "kenshimp.cfg: $k=$($cfg[$k]) (must be $($expected[$k]))" }
+        if ($cfg.ContainsKey($k) -and $cfg[$k] -ne $expected[$k]) { $problems += "kenshikin.cfg: $k=$($cfg[$k]) (must be $($expected[$k]))" }
     }
     foreach ($k in 'autotest', 'password', 'address') {
-        if ($cfg.ContainsKey($k) -and $cfg[$k] -and $cfg[$k] -ne '0' -and $cfg[$k] -ne '127.0.0.1') { $problems += "kenshimp.cfg: $k=$($cfg[$k]) (personal / test value)" }
+        if ($cfg.ContainsKey($k) -and $cfg[$k] -and $cfg[$k] -ne '0' -and $cfg[$k] -ne '127.0.0.1') { $problems += "kenshikin.cfg: $k=$($cfg[$k]) (personal / test value)" }
     }
 }
 
 # 4. RE_Kenshi.json loads the plugin
 $json = Join-Path $Dir 'RE_Kenshi.json'
-if ((Test-Path $json) -and -not ((Get-Content $json -Raw) -match '"KenshiMP\.dll"')) { $problems += "RE_Kenshi.json does not list KenshiMP.dll" }
+if ((Test-Path $json) -and -not ((Get-Content $json -Raw) -match '"KenshiKin\.dll"')) { $problems += "RE_Kenshi.json does not list KenshiKin.dll" }
 
 # 4b. The game starts the loader through MyGUI (no Plugins_x64.cfg change, nothing to run)
 $gx = Join-Path $Dir 'gui\core\core_settings.xml'
 if (Test-Path $gx) {
     $x = Get-Content $gx -Raw
-    if ($x -notmatch 'type="Plugin"' -or $x -notmatch 'mods/KenshiMP/KenshiMP_Loader\.dll') { $problems += "gui\core\core_settings.xml does not list the loader" }
+    if ($x -notmatch 'type="Plugin"' -or $x -notmatch 'mods/KenshiKin/KenshiKin_Loader\.dll') { $problems += "gui\core\core_settings.xml does not list the loader" }
     if ($x -notmatch 'Kenshi_StandardFont_Medium' -or $x -notmatch 'type="Pointer"') { $problems += "gui\core\core_settings.xml lost the game's own settings" }
-    if ($x -notmatch 'workshop/content/233860/\d+/') { Write-Host "check: note - no Workshop path in gui\core\core_settings.xml yet (workshop\item_id.txt, see UPLOAD.md)" }
 }
 
 # 5. Version: the DLL is newer than the sources it should come from
-$dll = Join-Path $Dir 'KenshiMP.dll'
+$dll = Join-Path $Dir 'KenshiKin.dll'
 if (Test-Path $dll) {
     $newest = Get-ChildItem "$PSScriptRoot\..\plugin\*.cpp", "$PSScriptRoot\..\plugin\*.h", "$PSScriptRoot\..\core\*" -File |
               Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($newest -and $newest.LastWriteTime -gt (Get-Item $dll).LastWriteTime) { $problems += "KenshiMP.dll is older than $($newest.Name): rebuild" }
+    if ($newest -and $newest.LastWriteTime -gt (Get-Item $dll).LastWriteTime) { $problems += "KenshiKin.dll is older than $($newest.Name): rebuild" }
 }
 $proto = Select-String -Path "$PSScriptRoot\..\core\Protocol.h" -Pattern 'PROTOCOL_VERSION = (\d+)' | Select-Object -First 1
 $version = if ($proto) { $proto.Matches[0].Groups[1].Value } else { '?' }
 
 if ($problems.Count -eq 0) {
-    Write-Host "check: package OK - KenshiMP v$version ($((Get-ChildItem $Dir -Recurse -File).Count) files)"
-    Write-Host "       next: tag the commit (git tag v$version, git push origin v$version), then workshop\UPLOAD.md"
+    Write-Host "check: package OK - KenshiKin v$version ($((Get-ChildItem $Dir -Recurse -File).Count) files)"
+    Write-Host "       next: tag the commit (git tag v$version, git push origin v$version), then attach dist\KenshiKin, zipped, to a GitHub release"
     exit 0
 }
 Write-Host "check: $($problems.Count) problem(s) in the package:"

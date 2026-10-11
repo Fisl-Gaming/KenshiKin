@@ -1,52 +1,32 @@
 # Changelog
 
-Players on different KenshiMP versions cannot play together (the host refuses the connection), so every
-Workshop update must be announced here and in the Workshop "Change Notes".
-Format: one section per Workshop release, newest first. The protocol number is `PROTOCOL_VERSION`
-in `core/Protocol.h`.
+Players on different versions cannot play together (the host refuses the connection). The version is the
+network protocol number (`PROTOCOL_VERSION` in `core/Protocol.h`), shown in the Multiplayer window title.
+KenshiMP's own history is in [docs/upstream-kenshimp/CHANGELOG.md](docs/upstream-kenshimp/CHANGELOG.md).
 
-## [v18] - first Workshop release (beta), protocol 18
+## v1022 — first public release
 
-Date: the day of the upload (write it here, and the Workshop item ID below, once published).
-Workshop item ID: 3813505705 (https://steamcommunity.com/sharedfiles/filedetails/?id=3813505705)
+Built on KenshiMP v18. Changes:
 
-Summary of what the first public build contains:
-
-- Per-player squads, factions, towns; player-vs-player war / peace / alliance
-- Live ghosts of other players: movement (interpolated, no teleport in normal conditions), appearance,
-  equipment, per-limb health, KO / death, combat animations, tasks, prosthetics, hunger
-- Damage authority model (attacker computes, victim's owner applies)
-- Shared host world: NPCs and animals around each player, clock, host-controlled pause, weather,
-  world states of unique NPCs and the town changes they cause, town doors broken and town buildings
-  destroyed by any player (`town_sync`), bounties for crimes seen in the host's world (protocol 17),
-  town containers with the host's content for everybody (protocol 18)
-- Joining a running game (protocol 18): GO TO in the multiplayer window / `/goto` moves your squad next
-  to another player's characters (reminder when a client arrives far from the host); the host sends its
-  clock and weather at once to a player who joins or reloads; player numbers kept between host restarts
-  (`players.cfg`)
-- Buildings and towns replicated both ways
-- Items: bodies, chests, worn backpacks, ground items, traders' stock and money, direct trade between players
-- Multiplayer window (title screen / pause menu / F4), chat, players on the world map, English + French
-- Other players' names always shown above their characters, in their chat colour (`player_names`)
-- Robust networking: timeouts, auto-reconnect, version + mod list check, input validation
-- Steam first: join through a Steam invitation from the title screen, then NEW GAME or CONTINUE in
-  the Multiplayer window; address / port / password only under ADVANCED SETTINGS
-- Runs without RE_Kenshi on the stock Steam game (loader + address table for 1.0.68): subscribe and
-  tick the mod, nothing to run (the game starts the loader as an interface plugin, no game file
-  changed); RE_Kenshi still supported, both kinds of players can play together
-- Settings in `%LOCALAPPDATA%\kenshi\KenshiMP\kenshimp.cfg`; the packaged template is `mode=off`
-- The version (= protocol number) is shown in the multiplayer window title and in the log
-
-Known limits: see `GUIDE.md` section 7 and `RISKS.md` (items marked as not yet validated in game).
-
-<!--
-Template for next releases:
-
-## [vN] - YYYY-MM-DD (protocol N)
-### Added
-### Changed
-### Fixed
-### Compatibility
-- Saves: compatible / not compatible
-- Config: new options / renamed options
--->
+- **Sneaking** is shown to other players.
+- **Furniture and lights:** towns a client loads while connected keep them (`populateBuilding` is no longer
+  blocked on clients; `block_building_populate=1` restores the old behaviour).
+- **Town life:** bar patrons and resting townsfolk are mirrored, so NPCs sit as on the host.
+- **Doors and gates** follow the host's world: open, closed, locked; a door a client lockpicks is unlocked
+  for the host too (`door_sync`).
+- **Knock-outs and deaths** of a copy are decided by its owner only: the copy is knocked down, held down,
+  woken up, and a death decided in the wrong world is undone.
+- **Carrying bodies:** lifting or putting down another player's character (by a player or by the host's
+  NPCs) is replayed in the owner's world; a downed copy nobody carries stays where its owner lies.
+- **Healing:** first aid and doctoring on another player's character reach the real one.
+- **Posture, beds, cages:** crawling, playing dead, in a bed, in a cage, on a prisoner pole travel with the
+  character; beds and cages are applied with the engine's own functions.
+- **Thefts and crimes:** the crime a client's character commits in the host's world reaches the host's copy,
+  in front of the host's NPCs; a theft from a town container is judged by the host from the container's
+  owner. Crimes between players are not crimes for the engine (no guards against a player who fights or
+  robs another player).
+- **Diagnostics:** clients' log lines in the host's log (`share_logs`); host console window outside the game
+  (`host_console`, `/console`); RESYNC button and `/resync`.
+- **Stability and speed:** engine hooks only record events, the main loop handles them (Kenshi runs damage
+  and medicine on its AI worker thread); lighter per-frame work for copies and replicated NPCs.
+- Update messages point to the release page; KenshiKin refuses to start next to KenshiMP.

@@ -1,4 +1,4 @@
-// State and helpers shared by the plugin modules (KenshiMP.cpp, Characters.cpp, Buildings.cpp).
+// State and helpers shared by the plugin modules (KenshiKin.cpp, Characters.cpp, Buildings.cpp).
 #pragma once
 #include "../core/Session.h"
 
@@ -14,6 +14,8 @@ class Building;
 class RootObject;
 class RootObjectBase;
 class Inventory;
+class Item;
+class GameData;
 
 namespace kmp {
 
@@ -47,6 +49,13 @@ struct Config
     bool assaultHostility; // attacking a player's characters outside a war lowers their faction's relation
     bool playerNames;      // other players' characters always show their name above their head
     bool townSync;         // host's world states (unique NPCs dead/jailed) and town changes apply to everybody
+    // KenshiKin fixes
+    bool blockPopulate;    // client: also block RootObjectFactory::populateBuilding (upstream behaviour: it emptied
+                           // the furniture and lights of towns loaded while connected); off by default
+    bool doorSync;         // host's town doors and gates (open / closed / locked) apply to everybody
+    bool theftSync;        // host: a client's theft from the host's world is judged by the host's NPCs
+    bool shareLogs;        // client: its log lines go to the host's log / console
+    bool hostConsole;      // host: the console window outside the game opens when hosting starts
     int backupSaves;       // host: backups kept per save (copied when a hosted game is ready), 0 = off
     std::string autotestLoad;  // test: save loaded automatically from the title screen
     bool autotest;             // test: scripted checks once another player is there (log "autotest:")
@@ -55,7 +64,7 @@ struct Config
                relation(0), ghostAI("none"), syncAppearance(true), syncEquipment(true), syncBuildings(true),
                debugKeys(false), npcSync(true), strictMods(true), autoReconnect(true), pauseSync(true),
                renderSmoothing(true), weatherSync(true), lobbyKey(VK_F4), lobbyKeyName("F4"), language("auto"), playersOnMap(true),
-               tuneSpeedMatch(true), tuneTrail(true), tuneRepath(true), tuneUnblock(true), tuneOnScreen(true), ghostNoCollide(false), loadSharing(false), assaultHostility(false), playerNames(true), townSync(true), backupSaves(5), autotest(false) {}
+               tuneSpeedMatch(true), tuneTrail(true), tuneRepath(true), tuneUnblock(true), tuneOnScreen(true), ghostNoCollide(false), loadSharing(false), assaultHostility(false), playerNames(true), townSync(true), blockPopulate(false), doorSync(true), theftSync(true), shareLogs(true), hostConsole(true), backupSaves(5), autotest(false) {}
 };
 
 extern mp::Session g_session;
@@ -67,7 +76,7 @@ bool ready();
 void log(const char* fmt, ...);
 bool mp_worldLoaded();                   // a game is loaded (our squad exists)
 std::string mp_modList();                // "game <version>;mod1;mod2..." as checked at handshake
-std::string mp_configDir();              // %LOCALAPPDATA%\kenshi\KenshiMP\ (with the final backslash)
+std::string mp_configDir();              // %LOCALAPPDATA%\kenshi\KenshiKin\ (with the final backslash)
 std::string report_write();              // Report.cpp: bug report folder on the desktop, returns the text to show
 void backup_hostSave();                  // Backup.cpp: host, game ready: copy its save folder (background thread)
 void backup_tick();                      // main thread: reports a finished copy
@@ -156,6 +165,12 @@ bool npcs_clientOwnWorld(uint8_t client); // host: that client simulates its own
 
 // Items.cpp: inventories and item transfers
 bool items_install();
+void items_allOf(Inventory* inv, std::vector<Item*>& out);   // KenshiKin: every item of an inventory
+void items_onLocalTheft(Character* thief, RootObject* from, GameData* item, bool noticed);   // main thread
+// KenshiKin: engine hooks may run on Kenshi's worker threads; they only post what happened here
+// (handles are taken at once) and chars_tick handles it on the main thread.
+enum { HOOK_CARRY_UP = 1, HOOK_CARRY_DOWN, HOOK_TREAT, HOOK_THEFT };
+void hooks_post(int kind, RootObject* a, RootObject* b, bool flag, float f1, float f2, GameData* data);
 void items_tick(DWORD now);
 void items_onMessage(const mp::NetEvent& e);
 void items_onPlayerLeft(uint8_t id);
@@ -211,7 +226,7 @@ void lobby_toggle();
 bool lobby_isOpen();
 void lobby_tick();
 void lobby_setError(const std::string& e);
-// KenshiMP.cpp: (re)start the session as "host" or "join" with g_cfg, or leave it; both save kenshimp.cfg.
+// KenshiKin.cpp: (re)start the session as "host" or "join" with g_cfg, or leave it; both save kenshikin.cfg.
 void mp_start(const std::string& mode);
 void mp_leave();
 
@@ -233,7 +248,7 @@ void chat_onWorldReload();
 std::string chat_clean(const std::string& in);   // strip control characters, escape colour codes
 const char* chat_playerColour(uint8_t id);       // MyGUI colour code of that player (chat, name labels)
 
-// KenshiMP.cpp: diplomacy with one player (id) or everybody (-1); value -100 war .. 100 allies
+// KenshiKin.cpp: diplomacy with one player (id) or everybody (-1); value -100 war .. 100 allies
 void diplomacy_set(int player, float value);
 float diplomacy_relation(uint8_t player);
 void diplomacy_assaulted(uint8_t player);   // that player hurt one of our characters (assault_hostility)   // our relation with that player's faction (0 if unknown)
@@ -254,6 +269,25 @@ void world_onMessage(const mp::NetEvent& e);
 void world_debugShift();
 
 // Towns.cpp: world states (unique NPCs dead / jailed) and town changes from the host
+// Console.cpp (KenshiKin): clients' logs on the host, host console window outside the game
+void logs_init();
+void logs_capture(const char* line);        // any thread
+void logs_onMessage(const mp::NetEvent& e);
+void logs_tick(DWORD now);
+void logs_openConsole();
+bool logs_popCommand(std::string& out);
+void logs_consoleLine(const std::string& s);
+// KenshiKin.cpp: resynchronisation (drop our copies of everybody, everybody resends everything)
+void mp_resyncSelf();
+std::string mp_resync(const std::string& who);   // "" / "me": us; "all": everybody (host); a name (host)
+
+// Doors.cpp (KenshiKin): town doors and gates open / closed / locked as in the host's world
+void doors_tick(DWORD now);
+void doors_onMessage(const mp::NetEvent& e);
+void doors_onPlayerLeft(uint8_t id);
+void doors_reset();
+void doors_resendAll();
+
 bool towns_install();
 void towns_tick(DWORD now);
 void towns_onMessage(const mp::NetEvent& e);

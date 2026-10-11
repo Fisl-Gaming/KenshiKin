@@ -2,9 +2,9 @@
 // everything needed to understand a problem, in one folder on the desktop that the player sends:
 //   session.txt         what this PC sees right now (version, game, mods, options, players, ping,
 //                       characters and where the other players are)
-//   RE_Kenshi_log.txt   the game's log with the "KenshiMP:" lines (copied while the game writes it)
-//   KenshiMP_loader.log the loader's log (players without RE_Kenshi)
-//   kenshimp.cfg        the settings, password removed
+//   RE_Kenshi_log.txt   the game's log with the "KenshiKin:" lines (copied while the game writes it)
+//   KenshiKin_loader.log the loader's log (players without RE_Kenshi)
+//   kenshikin.cfg        the settings, password removed
 //   players.cfg         host: player numbers kept between sessions
 #include <kenshi/GameWorld.h>
 #include <kenshi/Globals.h>
@@ -49,7 +49,7 @@ namespace
         return ok;
     }
 
-    // kenshimp.cfg without the session password.
+    // kenshikin.cfg without the session password.
     bool copySettings(const std::string& from, const std::string& to)
     {
         FILE* in = NULL;
@@ -72,8 +72,8 @@ namespace
 
     void writeSummary(FILE* f, const std::string& when)
     {
-        fprintf(f, "KenshiMP bug report - %s\n\n", when.c_str());
-        fprintf(f, "KenshiMP version   : v%u\n", (unsigned)PROTOCOL_VERSION);
+        fprintf(f, "KenshiKin bug report - %s\n\n", when.c_str());
+        fprintf(f, "KenshiKin version   : v%u\n", (unsigned)PROTOCOL_VERSION);
         fprintf(f, "Game and mods      : %s\n", mp_modList().c_str());
         fprintf(f, "RE_Kenshi          : %s\n", yesNo(GetModuleHandleA("RE_Kenshi.dll") != NULL));
         fprintf(f, "Interface language : %s\n", lang_french() ? "French" : "English");
@@ -127,10 +127,10 @@ std::string report_write()
     SYSTEMTIME t;
     GetLocalTime(&t);
     char stamp[64], when[64];
-    sprintf_s(stamp, "KenshiMP_report_%04d-%02d-%02d_%02d-%02d-%02d", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    sprintf_s(stamp, "KenshiKin_report_%04d-%02d-%02d_%02d-%02d-%02d", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
     sprintf_s(when, "%04d-%02d-%02d %02d:%02d:%02d", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
 
-    // The desktop, or next to kenshimp.cfg if it cannot be written.
+    // The desktop, or next to kenshikin.cfg if it cannot be written.
     std::string base = desktopDir(), dir;
     if (!base.empty()) { dir = base + "\\" + stamp; if (!CreateDirectoryA(dir.c_str(), NULL)) dir.clear(); }
     if (dir.empty()) { dir = mp_configDir() + stamp; if (!CreateDirectoryA(dir.c_str(), NULL)) return T("Bug report: could not create the folder."); }
@@ -144,8 +144,8 @@ std::string report_write()
     }
     int files = 1;
     if (copyShared("RE_Kenshi_log.txt", dir + "\\RE_Kenshi_log.txt")) ++files;
-    if (copyShared("KenshiMP_loader.log", dir + "\\KenshiMP_loader.log")) ++files;
-    if (copySettings(mp_configDir() + "kenshimp.cfg", dir + "\\kenshimp.cfg")) ++files;
+    if (copyShared("KenshiKin_loader.log", dir + "\\KenshiKin_loader.log")) ++files;
+    if (copySettings(mp_configDir() + "kenshikin.cfg", dir + "\\kenshikin.cfg")) ++files;
     if (copyShared(mp_configDir() + "players.cfg", dir + "\\players.cfg")) ++files;
     log("bug report written: %s (%d files)", dir.c_str(), files);
     return TF("Bug report saved (%d files): %s - send this folder (zip it) with a few words about what happened.", files, dir.c_str());

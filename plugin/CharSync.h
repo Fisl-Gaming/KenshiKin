@@ -17,6 +17,8 @@ mp::Bytes cs_equipmentMsg(Character* c, uint32_t id);
 mp::Bytes cs_statsMsg(Character* c, uint32_t id);
 // Current positions of the ghosts owned by a remote player (its squad, as seen here).
 void cs_ghostPositions(uint8_t owner, std::vector<Ogre::Vector3>& out);
+// The ghosts themselves (KenshiKin: the host judges a client's theft through them).
+void cs_ghostCharacters(uint8_t owner, std::vector<Character*>& out);
 // Positions of our own player characters.
 void cs_localPositions(std::vector<Ogre::Vector3>& out);
 // SEH-guarded Faction::destroyObject.

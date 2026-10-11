@@ -63,6 +63,9 @@
 using namespace mp;
 
 static bool g_replayingShot = false;   // a ghost firing because its owner did (MSG_SHOT)
+// KenshiKin: thread ids (0 = none) of our own engine calls, so the hooks know them from the engine's
+static volatile LONG g_applyingCarryThread = 0;   // we lift / drop because a carry happened in another world
+static volatile LONG g_applyingOwnerThread = 0;   // we mirror an owner's state (KO, death, posture, crime, treatment)
 
 namespace kmp {
 
@@ -72,7 +75,7 @@ namespace
     const DWORD SPAWN_PERIOD_MS = 5000;
     const DWORD LOOKS_PERIOD_MS = 1000;   // appearance / gear / stats change detection
     const float TELEPORT_DISTANCE = 15.f;
-    const float TASK_RANGE = 3.f;         // ghost must be this close to its owner's spot to mirror a task
+    const float TASK_RANGE = 4.f;         // ghost must be this close to its owner's spot to mirror a task (a stool's body keeps it ~3 away)
     const float COMBAT_LEASH = 8.f;       // while fighting, only pull the ghost back if it drifts further
     const float MELEE_SANITY_RANGE = 30.f;  // generous: interpolation delay + lunges
     const float SPAWN_RANGE = 2500.f;       // ghosts further than this from all our characters wait
@@ -172,6 +175,12 @@ namespace
             return !m || m->getCurrentSpeed() < 1.f || m->pathFailed();
         }
         __except (EXCEPTION_EXECUTE_HANDLER) { return true; }
+    }
+    // Sneaking: the ghost crouches when its owner does (and the host's NPCs judge it as sneaking).
+    bool safeSetStealth(Character* c, bool on)
+    {
+        __try { if (c->stealthMode != on) c->setStealthMode(on); return true; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
     }
     bool safeSetSpeed(Character* c, int speed)
     {
@@ -367,6 +376,9 @@ namespace
         case JOB_MEDIC: case JOB_REPAIR_ROBOT: case UNJAM_MACHINE: case UNJAM_ALL_MACHINES:
         case FILL_MACHINE: case EMPTY_MACHINE_OUTPUTS: case EMPTYING_MACHINE:
         case AUTO_LABOURING_MINES: case AUTO_LABOURING_MINES_PRETEND:
+        // KenshiKin: town life (bar patrons on their stools, idlers resting): without these the
+        // host's seated NPCs stood upright on the clients.
+        case GO_TO_THE_BAR_AND_DRINK: case RELAX_IN_TOWN_PACKAGE: case REST:
             return true;
         default:
             return false;
@@ -636,6 +648,15 @@ namespace
                   (fighting ? EntityState::IN_COMBAT : 0);
         s.moveSpeed = (uint8_t)c->getMovementSpeedOrders();
         if (c->getMovement() && c->getMovement()->isRunning()) s.flags |= EntityState::RUNNING;
+        if (c->stealthMode) s.flags |= EntityState::STEALTH;   // member read: no engine call, cannot fault
+        if (c->_isBeingCarried) s.flags |= EntityState::CARRIED;
+        {
+            int prone = (int)c->_currentProneState, occ = (int)c->inSomething;
+            if (prone < 0 || prone > 4) prone = 0;
+            if (occ < 0 || occ > 2) occ = 0;
+            s.body = (uint8_t)(prone | (occ << EntityState::OCC_SHIFT) | (c->isChained ? EntityState::CHAINED : 0));
+            if (occ) s.furniture = makeTargetRef(c->inWhat.getRootObjectBase());
+        }
 
         if (fighting)
             if (CombatClass* cc = c->getCombatClass())
@@ -724,6 +745,9 @@ namespace
         int mirroredTask;               // TaskType we last ordered (-1 none)
         TargetRef mirroredSubject;
         int lastSpeed;
+        int lastStealth;                // -1 unknown, 0 standing, 1 sneaking (as last applied)
+        DWORD lastPin, lastWake;        // KenshiKin: downed body kept on its owner's spot / woken with its owner
+        DWORD lastDownCmd, lastBodyApply, lastProneApply;   // KenshiKin 1021: knock-down / bed-cage / posture
         // --- smooth movement (see core/Interp.h)
         enum Mode { MOVE, COMBAT, TASK, FROZEN };
         Mode mode;
@@ -755,7 +779,7 @@ namespace
         Ogre::Vector3 knownPos;         // owner's last reported position, body or not (regroup)
         DWORD knownAt;                  // when (0: never)
         Ghost() : knownPos(Ogre::Vector3::ZERO), knownAt(0), floorTries(0), floorFor(-1), hasPendingAppearance(false), hasPendingEquipment(false), hasLimbs(false), hasPendingStats(false), pendingHunger(-1.f), pendingRanged(-1),
-                  combatTarget(NULL), mirroredTask(-1), lastSpeed(-1), mode(MOVE), intervalMs(100),
+                  combatTarget(NULL), mirroredTask(-1), lastSpeed(-1), lastStealth(-1), lastPin(0), lastWake(0), lastDownCmd(0), lastBodyApply(0), lastProneApply(0), mode(MOVE), intervalMs(100),
                   lastSnapT(0), lastMoveCmd(0), lastFrame(0), hasVisual(false), visualPos(Ogre::Vector3::ZERO),
                   visualRot(Ogre::Quaternion::IDENTITY), blend(0), lastDrawn(Ogre::Vector3::ZERO),
                   stuckSince(0), stuckTarget(Ogre::Vector3::ZERO), lastBody(Ogre::Vector3::ZERO), freezeMs(0), lastDest(Ogre::Vector3::ZERO), hasDest(false),
@@ -781,7 +805,7 @@ namespace
         char buf[96]; sprintf_s(buf, what, amount);
         log("suspicious movement: %s's character %08x %s", playerName(player).c_str(), s.netId, buf);
         std::string shown = TF(what, amount);
-        showMessage("KenshiMP: " + TF("%s's character %s (speed hack or lag?).", playerName(player).c_str(), shown.c_str()));
+        showMessage("KenshiKin: " + TF("%s's character %s (speed hack or lag?).", playerName(player).c_str(), shown.c_str()));
     }
     std::map<uint32_t, Ghost> g_ghosts;
     int g_npcGhostsSpawned = 0;
@@ -797,21 +821,42 @@ namespace
     }
     std::map<Character*, uint32_t> g_ghostByChar;   // rebuilt every tick, read by the hooks (g_lock)
     std::map<Character*, bool> g_ghostFighting;      // ghosts currently mirroring a fight (g_lock)
+    std::map<Character*, uint8_t> g_ghostDown;       // KenshiKin: owner's DEAD / UNCONSCIOUS flags per copy (g_lock)
     volatile bool g_applyingSync = false;          // lets our own damage through the hooks
+    // KenshiKin: the index was rebuilt every frame (two maps of every ghost, hundreds with the host's
+    // NPCs); now on spawn / despawn / fight changes, plus a slow safety refresh.
+    bool g_ghostIndexDirty = true;
+    DWORD g_lastGhostIndex = 0;
+    const DWORD GHOST_INDEX_REFRESH_MS = 250;
 
     void rebuildGhostIndex()
     {
+        g_ghostIndexDirty = false;
+        g_lastGhostIndex = GetTickCount();
         std::map<Character*, uint32_t> idx;
         std::map<Character*, bool> fighting;
+        std::map<Character*, uint8_t> down;
         for (std::map<uint32_t, Ghost>::iterator it = g_ghosts.begin(); it != g_ghosts.end(); ++it)
             if (Character* c = it->second.h.getCharacter())
             {
                 idx[c] = it->first;
                 if (it->second.last.flags & EntityState::IN_COMBAT) fighting[c] = true;
+                down[c] = it->second.last.flags & (EntityState::DEAD | EntityState::UNCONSCIOUS);
             }
         Lock l;
         g_ghostByChar.swap(idx);
         g_ghostFighting.swap(fighting);
+        g_ghostDown.swap(down);
+    }
+
+    // Any thread. False: not a copy.
+    bool ghostDownFlags(Character* c, uint8_t* flags)
+    {
+        Lock l;
+        if (g_ghostByChar.find(c) == g_ghostByChar.end()) return false;
+        std::map<Character*, uint8_t>::iterator it = g_ghostDown.find(c);
+        *flags = it == g_ghostDown.end() ? 0 : it->second;
+        return true;
     }
 
     bool ghostFighting(Character* c)
@@ -1031,7 +1076,7 @@ namespace
         if (!c) { log("factory returned no character for %08x", sp.netId); return; }
         g.h = hand(c);
         g.last.netId = sp.netId;
-        g.combatTarget = NULL; g.mirroredTask = -1; g.lastSpeed = -1;
+        g.combatTarget = NULL; g.mirroredTask = -1; g.lastSpeed = -1; g.lastStealth = -1;
         if (!isNpcNetId(sp.netId))
         {
             log("ghost %08x spawned (%s)", sp.netId, sp.displayName.c_str());
@@ -1074,6 +1119,178 @@ namespace
         if (c && !safeDestroy(c)) log("could not destroy ghost %08x", id);
     }
 
+    // KenshiKin: bodies follow their owner only (protocol 1021).
+    //  - Down / dead: decided by the owner alone. The copy is knocked down and held down while its
+    //    owner is out (the KO timer is topped up so the copy never gets up on its own), released
+    //    when the owner is up again, and a death its own world decided is undone. The engine's own
+    //    knockout / death calls on a copy are refused unless the owner reported it (hooks at the
+    //    end of the file). Same idea as nhoral/KenshiCoop (AGPL-3.0: down enforcement, revive) and
+    //    Shared-Wastelands (MIT: KO refusals on copies).
+    //  - A body nobody carries stays on its owner's spot; a body in a bed, a cage, on a pole or on a
+    //    shoulder is left to that attachment.
+    //  - Posture (ProneState: crawling cripple, playing dead...) and bed / cage occupancy follow
+    //    the owner's engine values (nhoral's BODY_* flags, setBedMode / setPrisonMode).
+    const float PIN_DISTANCE = 4.f;
+    const DWORD PIN_PERIOD_MS = 1000;
+    long g_pins = 0, g_wakes = 0, g_knockdowns = 0, g_deathVetoes = 0, g_occupancies = 0;
+
+    struct ApplyingOwner   // the engine calls below are ours: the copy hooks let them through
+    {
+        LONG prev;
+        ApplyingOwner() : prev(g_applyingOwnerThread) { g_applyingOwnerThread = (LONG)GetCurrentThreadId(); g_applyingSync = true; }
+        ~ApplyingOwner() { g_applyingOwnerThread = prev; g_applyingSync = false; }
+    };
+    bool safeKnockDown(Character* c, bool holdOnly)
+    {
+        __try
+        {
+            if (!holdOnly) c->medical.knockout(1.0f);   // the fall
+            c->medical.knockoutForceTimer(8.0f);         // and no getting up on its own
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    bool safeRelease(Character* c, bool ragdollOff)
+    {
+        __try
+        {
+            c->medical.knockoutForceTimer(0.0f);
+            if (ragdollOff) c->ragdollMode(false, RagdollPart::WHOLE);
+            c->medical.unconcious = false;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    bool safeVetoDeath(Character* c)
+    {
+        __try
+        {
+            c->medical.knockoutForceTimer(0.0f);
+            c->ragdollMode(false, RagdollPart::WHOLE);
+            c->medical.dead = false;
+            c->medical.unconcious = false;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    bool safeProne(Character* c, int p)
+    {
+        __try { c->setProneState((ProneState)p); return true; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    UseableStuff* safeUseable(RootObject* o)
+    {
+        __try { return o ? static_cast<Building*>(o)->getUseableStuff() : NULL; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return NULL; }
+    }
+    bool safeOccupy(Character* c, int occ, bool on, UseableStuff* u)
+    {
+        __try { if (occ == IN_BED) c->setBedMode(on, u); else c->setPrisonMode(on, u); return true; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
+    // In a bed / cage / on a pole / on a shoulder: that attachment owns the body's transform.
+    bool attached(Character* c, const EntityState& s)
+    {
+        return (s.flags & EntityState::CARRIED) || c->_isBeingCarried || s.occupancy() != IN_NOTHING ||
+               c->inSomething != IN_NOTHING || (s.body & EntityState::CHAINED) || c->isChained;
+    }
+
+    void pinDowned(Ghost& g, Character* c, const EntityState& s)
+    {
+        if ((s.flags & EntityState::CARRIED) || c->_isBeingCarried || s.occupancy() != IN_NOTHING || c->inSomething != IN_NOTHING) return;
+        Ogre::Vector3 at(s.x, s.y, s.z);
+        if (hdist(c->getPosition(), at) < PIN_DISTANCE) return;
+        DWORD now = GetTickCount();
+        if (now - g.lastPin < PIN_PERIOD_MS) return;
+        g.lastPin = now;
+        if (safeTeleport(c, &at, s.floor))
+        {
+            static DWORD lastLog = 0;
+            if (++g_pins == 1 || now - lastLog > 10000) { lastLog = now; log("downed ghost %08x put back where its owner lies (%ld so far)", s.netId, g_pins); }
+        }
+    }
+
+    // Owner out cold: the copy too, on the ground unless something holds it (bed, cage, shoulder).
+    void holdDown(Ghost& g, Character* c, const EntityState& s, bool attachedNow)
+    {
+        DWORD now = GetTickCount();
+        if (!c->medical.unconcious)
+        {
+            if (now - g.lastDownCmd < 1000) return;
+            g.lastDownCmd = now;
+            ApplyingOwner a;
+            // attached: only the unconscious state, never the fall that would pull it out of there
+            if (safeKnockDown(c, attachedNow))
+            {
+                static DWORD lastLog = 0;
+                if (++g_knockdowns == 1 || now - lastLog > 10000) { lastLog = now; log("ghost %08x knocked down: its owner is out (%ld so far)", s.netId, g_knockdowns); }
+            }
+            return;
+        }
+        if (now - g.lastDownCmd < 500) return;
+        g.lastDownCmd = now;
+        ApplyingOwner a;
+        safeKnockDown(c, true);   // top up the KO timer: never gets up before its owner
+    }
+
+    // Owner up: so is the copy, whatever its own world decided.
+    void wakeWithOwner(Ghost& g, Character* c, const EntityState& s)
+    {
+        DWORD now = GetTickCount();
+        if (now - g.lastWake < 1000) return;
+        g.lastWake = now;
+        ApplyingOwner a;
+        if (c->isDead())
+        {
+            if (safeVetoDeath(c)) { ++g_deathVetoes; log("ghost %08x: a death decided here undone (its owner is alive)", s.netId); }
+            return;
+        }
+        if (safeRelease(c, !attached(c, s)))
+        {
+            static DWORD lastLog = 0;
+            if (++g_wakes == 1 || now - lastLog > 10000) { lastLog = now; log("ghost %08x woken up: its owner is up (%ld so far)", s.netId, g_wakes); }
+        }
+    }
+
+    // Bed / cage occupancy as the owner has it.
+    void applyOccupancy(Ghost& g, Character* c, const EntityState& s)
+    {
+        int want = s.occupancy(), have = (int)c->inSomething;
+        if (want == IN_NOTHING && have == IN_NOTHING) return;
+        RootObject* f = want != IN_NOTHING ? resolveTargetRef(s.furniture) : NULL;
+        Building* cur = have != IN_NOTHING ? c->inWhat.getBuilding() : NULL;
+        if (want == have && f && cur && static_cast<RootObject*>(cur) == f) return;   // already there
+        DWORD now = GetTickCount();
+        if (now - g.lastBodyApply < 1000) return;
+        g.lastBodyApply = now;
+        ApplyingOwner a;
+        if (have != IN_NOTHING)
+            if (UseableStuff* u = safeUseable(cur)) safeOccupy(c, have, false, u);
+        if (want == IN_NOTHING) { log("ghost %08x: out of its %s, as its owner", s.netId, have == IN_BED ? "bed" : "cage"); return; }
+        UseableStuff* u = safeUseable(f);
+        if (!u)
+        {
+            static DWORD lastLog = 0;
+            if (now - lastLog > 10000) { lastLog = now; log("ghost %08x: its owner's %s '%s' is missing here", s.netId, want == IN_BED ? "bed" : "cage", s.furniture.sid.c_str()); }
+            return;
+        }
+        if (safeOccupy(c, want, true, u)) { ++g_occupancies; log("ghost %08x put in its owner's %s (%s)", s.netId, want == IN_BED ? "bed" : "cage", s.furniture.sid.c_str()); }
+    }
+
+    // Posture of a conscious owner (crawling cripple, playing dead, staying low).
+    void applyProne(Ghost& g, Character* c, const EntityState& s)
+    {
+        if (s.flags & EntityState::STEALTH) return;           // the sneak toggle sets its own posture
+        int p = s.prone();
+        if (p == PS_KO || p == (int)c->_currentProneState) return;
+        DWORD now = GetTickCount();
+        if (now - g.lastProneApply < 500) return;
+        g.lastProneApply = now;
+        ApplyingOwner a;
+        safeProne(c, p);
+    }
+
     // What the ghost does (health, KO, combat, task). Where it is shown is decided every frame
     // by driveGhosts() from the interpolation buffer fed here.
     void applyGhostState(const EntityState& s, double snapLocalMs)
@@ -1084,6 +1301,9 @@ namespace
         g.knownPos = Ogre::Vector3(s.x, s.y, s.z); g.knownAt = GetTickCount();
         Character* c = g.h.getCharacter();
         if (!c) return;
+        if ((g.last.flags ^ s.flags) & EntityState::IN_COMBAT) g_ghostIndexDirty = true;   // ghostFighting() follows
+        if ((g.last.flags ^ s.flags) & (EntityState::DEAD | EntityState::UNCONSCIOUS))
+        { Lock l; g_ghostDown[c] = s.flags & (EntityState::DEAD | EntityState::UNCONSCIOUS); }   // the KO / death hooks follow at once
         g.last = s;
 
         Snapshot snap;
@@ -1110,24 +1330,44 @@ namespace
             log("health mirror failed on %08x", s.netId);
 
         bool ownerDead = (s.flags & EntityState::DEAD) != 0, ownerKO = (s.flags & EntityState::UNCONSCIOUS) != 0;
-        if (ownerDead && !c->isDead())
+        applyOccupancy(g, c, s);                 // bed / cage first: a KO'd body may be placed in one
+        bool held = attached(c, s);
+        if (ownerDead)
         {
-            g_applyingSync = true;
-            Damages kill(1000, 1000, 0, 0, 0);
-            for (uint32_t i = 0; i < c->medical.anatomy.size(); ++i) c->medical.anatomy[i]->applyDamage(kill);
-            g_applyingSync = false;
+            if (!c->isDead())
+            {
+                ApplyingOwner a;
+                Damages kill(1000, 1000, 0, 0, 0);
+                for (uint32_t i = 0; i < c->medical.anatomy.size(); ++i) c->medical.anatomy[i]->applyDamage(kill);
+            }
+            if (!held) pinDowned(g, c, s);
             g.mode = Ghost::FROZEN;
             return;
         }
-        if (ownerDead || ownerKO)
+        if (ownerKO)
         {
-            if (ownerKO && !c->medical.isUnconcious()) c->medical.knockoutForceTimer(1.0f);
+            holdDown(g, c, s, held);
+            if (!held) pinDowned(g, c, s);
             g.mode = Ghost::FROZEN;
             return;
         }
+        if (c->isDead() || c->medical.unconcious) wakeWithOwner(g, c, s);
+        applyProne(g, c, s);
+        if (s.occupancy() != IN_NOTHING) { g.mode = Ghost::FROZEN; return; }   // awake in a bed / cage (getting out: applyOccupancy retries)
+        if (s.body & EntityState::CHAINED) { pinDowned(g, c, s); g.mode = Ghost::FROZEN; return; }           // on a prisoner pole
 
         // --- walk / jog / run like the owner
         if (s.moveSpeed != g.lastSpeed) { g.lastSpeed = s.moveSpeed; safeSetSpeed(c, s.moveSpeed); }
+        // --- sneak like the owner (applied on change only)
+        {
+            int sneak = (s.flags & EntityState::STEALTH) ? 1 : 0;
+            static int failures = 0;   // engine refuses (address table): stop trying, the rest still works
+            if (sneak != g.lastStealth && failures < 5)
+            {
+                if (safeSetStealth(c, sneak != 0)) g.lastStealth = sneak;
+                else if (++failures == 5) log("stealth mirror disabled (engine exceptions)");
+            }
+        }
 
         Ogre::Vector3 target(s.x, s.y, s.z);
         float dist = c->getPosition().distance(target);
@@ -1181,6 +1421,17 @@ namespace
                     if (g_cfg.debugKeys) log("ghost %08x copies its owner's task %d", s.netId, (int)s.task);
                     g.mirroredTask = s.task;
                     g.mirroredSubject = s.taskSubject;
+                }
+                else if (!subject && s.taskSubject.kind != TargetRef::NONE)
+                {
+                    // Usually furniture that does not exist here (chair, bed, machine): say so once in a while.
+                    static DWORD lastMiss = 0;
+                    if (GetTickCount() - lastMiss > 10000)
+                    {
+                        lastMiss = GetTickCount();
+                        log("ghost %08x: task %d not copied, its subject '%s' at (%.0f, %.0f, %.0f) is missing here", s.netId, (int)s.task,
+                            s.taskSubject.sid.c_str(), s.taskSubject.x, s.taskSubject.y, s.taskSubject.z);
+                    }
                 }
             }
             return;
@@ -1844,6 +2095,13 @@ void cs_ghostPositions(uint8_t owner, std::vector<Ogre::Vector3>& out)
             if (Character* c = it->second.h.getCharacter()) out.push_back(c->getPosition());
 }
 
+void cs_ghostCharacters(uint8_t owner, std::vector<Character*>& out)
+{
+    for (std::map<uint32_t, Ghost>::iterator it = g_ghosts.begin(); it != g_ghosts.end(); ++it)
+        if (netIdOwner(it->first) == owner && !isNpcNetId(it->first))
+            if (Character* c = it->second.h.getCharacter()) out.push_back(c);
+}
+
 void cs_localPositions(std::vector<Ogre::Vector3>& out)
 {
     for (size_t i = 0; i < g_local.size(); ++i)
@@ -2196,6 +2454,11 @@ static void refreshNearNpcs(DWORD now)
     g_nearNpcs.swap(near_);
 }
 
+// KenshiKin: defined with the carry / treatment hooks at the end of the file.
+namespace { void flushTreatments(DWORD now); void onCarryMessage(const NetEvent& e, ByteReader& r); void onTreatmentMessage(const NetEvent& e, ByteReader& r);
+            void processHookEvents(); void sendCrimes(DWORD now); void onCrimeMessage(const NetEvent& e, ByteReader& r); }
+extern volatile LONG g_koRefused, g_deathRefused, g_pvpCrimesRefused;
+
 void chars_tick(DWORD now)
 {
     driveGhosts(now);   // every frame
@@ -2214,7 +2477,22 @@ void chars_tick(DWORD now)
         sendLooks(g_forceLooks);
         g_forceLooks = false;
     }
-    rebuildGhostIndex();
+    if (g_ghostIndexDirty || now - g_lastGhostIndex >= GHOST_INDEX_REFRESH_MS) rebuildGhostIndex();
+    processHookEvents();
+    flushTreatments(now);
+    sendCrimes(now);
+    static LONG lastKo = 0, lastDeath = 0;
+    static DWORD lastRefusalLog = 0;
+    static LONG lastPvp = 0;
+    if (g_pvpCrimesRefused != lastPvp && now - lastRefusalLog > 30000)
+    { log("crimes between players refused: %ld (guards stay out of it)", (long)(g_pvpCrimesRefused - lastPvp)); lastPvp = g_pvpCrimesRefused; }
+    if ((g_koRefused != lastKo || g_deathRefused != lastDeath) && now - lastRefusalLog > 30000)
+    {
+        lastRefusalLog = now;
+        log("copies: %ld knockout(s) and %ld death(s) decided here refused (only owners decide); %ld knock-down(s), %ld wake(s), %ld death veto(es), %ld bed/cage placement(s)",
+            (long)(g_koRefused - lastKo), (long)(g_deathRefused - lastDeath), g_knockdowns, g_wakes, g_deathVetoes, g_occupancies);
+        lastKo = g_koRefused; lastDeath = g_deathRefused;
+    }
 }
 
 void chars_resendAll()
@@ -2280,6 +2558,9 @@ void chars_onMessage(const NetEvent& e)
         spawnGhost(e.sender, sp);
         break;
     }
+    case MSG_CARRY: onCarryMessage(e, r); break;
+    case MSG_FIRST_AID: onTreatmentMessage(e, r); break;
+    case MSG_CRIME: onCrimeMessage(e, r); break;
     case MSG_ENTITY_DESPAWN:
     {
         uint32_t id = r.u32();
@@ -2714,14 +2995,393 @@ void addOrder_hook(Character* self, Building* dest, TaskType t, RootObject* subj
         {
             if (!isNpcNetId(id))
             {
-                showMessage(T("You cannot carry or cage another player's character."));
-                return;
+                // KenshiKin: lifting a downed friend is allowed, the carry is replayed in its owner's
+                // world (MSG_CARRY). Cages and beds stay off limits.
+                bool lift = (t == PICKUP || t == LIFT_OBJECT_BUT_HEAL_FIRST) && (target->isDead() || target->medical.unconcious);
+                if (!lift)
+                {
+                    showMessage(T("You cannot carry or cage another player's character."));
+                    return;
+                }
             }
-            chars_claimWhenNear(id, target);
+            else chars_claimWhenNear(id, target);
         }
     }
     addOrder_orig(self, dest, t, subject, shift, clear, loc);
 }
+
+// --- KenshiKin hooks: carrying and treating other players' characters ---------------------------
+// Character::pickupObject / dropCarriedObject: somebody here (a player or one of the host's NPCs)
+// lifts or puts down another player's character. Its owner makes our carrier's copy do the same,
+// so the body travels in both worlds (MSG_CARRY).
+namespace kmp { namespace {
+    Character* safeCarried(Character* carrier)
+    {
+        __try { return carrier->isCarryingSomething ? carrier->getCarryingObject().getCharacter() : NULL; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return NULL; }
+    }
+    bool safePickup(Character* carrier, Character* who)
+    {
+        __try { carrier->pickupObject(who); return true; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    bool safeDrop(Character* carrier)
+    {
+        __try { if (carrier->isCarryingSomething) carrier->dropCarriedObject(true, false); return true; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    bool safeTreat(MedicalSystem* m, bool doctoring, float skill, Item* kit, float seconds, Character* medic)
+    {
+        __try { return doctoring ? m->applyDoctoring(skill, kit, seconds, medic) : m->applyFirstAid(skill, kit, seconds, medic); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
+    void onLocalCarry(Character* carrier, Character* carried, bool up)
+    {
+        if (!ready() || !carrier || !carried) return;
+        uint32_t cid = ghostIdOf(carried);
+        if (!cid || isNpcNetId(cid)) return;          // our own characters / world NPCs: nothing to replay
+        uint32_t carrierId = chars_netIdOf(carrier);
+        if (!carrierId) { log("carry of %08x by an untracked character: not replayed", cid); return; }
+        ByteWriter w; w.u8(netIdOwner(cid)); w.u32(cid); w.u32(carrierId); w.u8(up ? 1 : 0);
+        g_session.sendTo(netIdOwner(cid), MSG_CARRY, w.data);
+        log("carry: %08x %s by %08x here, replayed by %s", cid, up ? "lifted" : "put down", carrierId, playerName(netIdOwner(cid)).c_str());
+    }
+
+    void onCarryMessage(const NetEvent& e, ByteReader& r)
+    {
+        uint8_t target = r.u8();
+        uint32_t carriedId = r.u32(), carrierId = r.u32();
+        uint8_t up = r.u8();
+        if (!r.ok() || target != g_session.localId() || netIdOwner(carriedId) != target || netIdOwner(carrierId) != e.sender) return;
+        Character* carried = localByNetId(carriedId);
+        Character* carrier = chars_byNetId(carrierId);
+        if (!carried || !carrier || !chars_isGhost(carrier))
+        { log("carry from %s: %08x / %08x not found here", playerName(e.sender).c_str(), carriedId, carrierId); return; }
+        g_applyingCarryThread = (LONG)GetCurrentThreadId();
+        bool ok = up ? (carried->_isBeingCarried || safePickup(carrier, carried)) : (safeCarried(carrier) != carried || safeDrop(carrier));
+        g_applyingCarryThread = 0;
+        log("carry: our %08x %s by %08x (as in %s's world)%s", carriedId, up ? "lifted" : "put down", carrierId, playerName(e.sender).c_str(), ok ? "" : " - FAILED");
+    }
+
+    // Treatment (first aid / doctoring) of a replicated character: what the medic did here is
+    // summed for 100 ms and sent to the patient's owner, which applies it to the real body (here the
+    // health mirror would erase it). The local call still runs: the medic's task and animation go on.
+    struct Treatment { uint32_t patient, medic; bool doctoring; float skill, seconds; std::string kit; };
+    std::vector<Treatment> g_treatments;
+    DWORD g_lastTreatFlush = 0;
+
+    void onLocalTreatment(MedicalSystem* m, bool doctoring, float skill, GameData* kitData, float seconds, Character* medic)
+    {
+        if (!ready() || !m || !m->me || seconds <= 0) return;
+        uint32_t pid = ghostIdOf(m->me);
+        if (!pid) return;                              // our own patient: nothing to share
+        Treatment t; t.patient = pid; t.medic = medic ? chars_netIdOf(medic) : 0; t.doctoring = doctoring;
+        t.skill = skill; t.seconds = seconds; t.kit = kitData ? kitData->stringID : std::string();
+        for (size_t i = 0; i < g_treatments.size(); ++i)
+        {
+            Treatment& o = g_treatments[i];
+            if (o.patient == t.patient && o.medic == t.medic && o.doctoring == t.doctoring && o.kit == t.kit) { o.seconds += t.seconds; o.skill = t.skill; return; }
+        }
+        if (g_treatments.size() < 64) g_treatments.push_back(t);
+    }
+
+    void flushTreatments(DWORD now)
+    {
+        if (g_treatments.empty() || now - g_lastTreatFlush < 100) return;
+        g_lastTreatFlush = now;
+        for (size_t i = 0; i < g_treatments.size(); ++i)
+        {
+            const Treatment& t = g_treatments[i];
+            ByteWriter w; w.u8(netIdOwner(t.patient)); w.u32(t.patient); w.u32(t.medic); w.u8(t.doctoring ? 1 : 0);
+            w.f32(t.skill); w.f32(t.seconds); w.str(t.kit);
+            g_session.sendTo(netIdOwner(t.patient), MSG_FIRST_AID, w.data);
+            static DWORD lastLog = 0;
+            if (now - lastLog > 5000) { lastLog = now; log("treatment of %08x by %08x sent to its owner (%.2f s, kit '%s')", t.patient, t.medic, t.seconds, t.kit.c_str()); }
+        }
+        g_treatments.clear();
+    }
+
+    Item* findKit(Character* who, const std::string& sid)
+    {
+        if (!who || !who->inventory || sid.empty()) return NULL;
+        std::vector<Item*> all;
+        items_allOf(who->inventory, all);
+        for (size_t i = 0; i < all.size(); ++i) if (all[i] && all[i]->data && all[i]->data->stringID == sid) return all[i];
+        return NULL;
+    }
+
+    void onTreatmentMessage(const NetEvent& e, ByteReader& r)
+    {
+        uint8_t target = r.u8();
+        uint32_t pid = r.u32(), mid = r.u32();
+        bool doctoring = r.u8() != 0;
+        float skill = clampF(r.f32(), 0.f, 1000.f), seconds = clampF(r.f32(), 0.f, 2.f);
+        std::string kitSid = r.str();
+        if (!r.ok() || target != g_session.localId() || netIdOwner(pid) != target || seconds <= 0) return;
+        Character* patient = localByNetId(pid);
+        Character* medic = mid ? chars_byNetId(mid) : NULL;
+        if (!patient) return;
+        if (medic && medic->getPosition().distance(patient->getPosition()) > 30.f) return;   // medics work face to face
+        Item* kit = findKit(medic, kitSid);
+        if (!kit && !kitSid.empty()) kit = findKit(patient, kitSid);
+        { ApplyingOwner a; safeTreat(&patient->medical, doctoring, skill, kit, seconds, medic); }
+        static DWORD lastLog = 0;
+        if (GetTickCount() - lastLog > 5000) { lastLog = GetTickCount(); log("%s treats our %08x (%s, kit %s)", playerName(e.sender).c_str(), pid, doctoring ? "doctoring" : "first aid", kit ? "found" : (kitSid.empty() ? "none" : "missing")); }
+    }
+} }
+
+// --- KenshiKin: hook events, thread-safe ---------------------------------------------------------
+// Kenshi runs damage and medicine on its AI worker thread, not on the main loop (measured by
+// Shared-Wastelands, MIT). The v1020 hooks below touched main-thread tables from wherever they
+// were called; now a hook only records what happened (handles, never bare pointers) under the
+// lock, and the main loop handles it in chars_tick.
+namespace kmp {
+    struct HookEvent { int kind; hand a, b; bool flag; float f1, f2; GameData* data; };
+    std::vector<HookEvent> g_hookEvents;          // g_lock
+    long g_hookEventsDropped = 0;
+
+    void hooks_post(int kind, RootObject* a, RootObject* b, bool flag, float f1, float f2, GameData* data)
+    {
+        HookEvent e; e.kind = kind; e.flag = flag; e.f1 = f1; e.f2 = f2; e.data = data;
+        if (a) e.a = hand(a);
+        if (b) e.b = hand(b);
+        Lock l;
+        if (g_hookEvents.size() >= 512) { ++g_hookEventsDropped; return; }
+        g_hookEvents.push_back(e);
+    }
+
+    namespace {
+        void processHookEvents()
+        {
+            std::vector<HookEvent> evs;
+            { Lock l; evs.swap(g_hookEvents); }
+            for (size_t i = 0; i < evs.size(); ++i)
+            {
+                HookEvent& e = evs[i];
+                switch (e.kind)
+                {
+                case HOOK_CARRY_UP: case HOOK_CARRY_DOWN:
+                    onLocalCarry(e.a.getCharacter(), e.b.getCharacter(), e.kind == HOOK_CARRY_UP);
+                    break;
+                case HOOK_TREAT:
+                    if (Character* p = e.a.getCharacter()) onLocalTreatment(&p->medical, e.flag, e.f1, e.data, e.f2, e.b.getCharacter());
+                    break;
+                case HOOK_THEFT:
+                    items_onLocalTheft(e.a.getCharacter(), e.b.getRootObject(), e.data, e.flag);
+                    break;
+                }
+            }
+            static long lastDropped = 0;
+            if (g_hookEventsDropped != lastDropped) { lastDropped = g_hookEventsDropped; log("hook events: %ld dropped (queue full)", lastDropped); }
+        }
+    }
+}
+
+void (*pickup_orig)(Character*, Character*) = NULL;
+void pickup_hook(Character* self, Character* who)
+{
+    pickup_orig(self, who);
+    if (g_applyingCarryThread != (LONG)GetCurrentThreadId() && ready()) kmp::hooks_post(kmp::HOOK_CARRY_UP, self, who, true, 0, 0, NULL);
+}
+void (*dropCarried_orig)(Character*, bool, bool) = NULL;
+void dropCarried_hook(Character* self, bool ragdoll, bool removeOnly)
+{
+    Character* carried = g_applyingCarryThread != (LONG)GetCurrentThreadId() && self && ready() ? kmp::safeCarried(self) : NULL;
+    dropCarried_orig(self, ragdoll, removeOnly);
+    if (carried) kmp::hooks_post(kmp::HOOK_CARRY_DOWN, self, carried, false, 0, 0, NULL);
+}
+bool (*firstAid_orig)(MedicalSystem*, float, Item*, float, Character*) = NULL;
+bool firstAid_hook(MedicalSystem* self, float skill, Item* kit, float seconds, Character* who)
+{
+    bool r = firstAid_orig(self, skill, kit, seconds, who);
+    if (g_applyingOwnerThread != (LONG)GetCurrentThreadId() && self && self->me && seconds > 0 && ready())
+        kmp::hooks_post(kmp::HOOK_TREAT, self->me, who, false, skill, seconds, kit ? kit->data : NULL);
+    return r;
+}
+bool (*doctoring_orig)(MedicalSystem*, float, Item*, float, Character*) = NULL;
+bool doctoring_hook(MedicalSystem* self, float skill, Item* kit, float seconds, Character* who)
+{
+    bool r = doctoring_orig(self, skill, kit, seconds, who);
+    if (g_applyingOwnerThread != (LONG)GetCurrentThreadId() && self && self->me && seconds > 0 && ready())
+        kmp::hooks_post(kmp::HOOK_TREAT, self->me, who, true, skill, seconds, kit ? kit->data : NULL);
+    return r;
+}
+
+// --- KenshiKin: only the owner knocks out or kills its characters -------------------------------
+// MedicalSystem::knockout / startKnockoutTimer and Character::declareDead on a copy (another
+// player's character, or a host NPC on a client) are refused unless its owner reported it, or
+// the call comes from our own mirroring (ApplyingOwner). Any thread: index lookups take the lock.
+namespace kmp {
+    volatile LONG g_koRefused = 0, g_deathRefused = 0;
+    bool ownerAllows(Character* c, uint8_t flags)
+    {
+        if (!c || g_applyingOwnerThread == (LONG)GetCurrentThreadId() || !ready()) return true;
+        uint8_t f = 0;
+        if (!ghostDownFlags(c, &f)) return true;     // not a copy: the engine decides as usual
+        return (f & flags) != 0;
+    }
+}
+void (*knockout_orig)(MedicalSystem*, float) = NULL;
+void knockout_hook(MedicalSystem* self, float skill01)
+{
+    if (self && !kmp::ownerAllows(self->me, EntityState::UNCONSCIOUS | EntityState::DEAD)) { InterlockedIncrement(&kmp::g_koRefused); return; }
+    knockout_orig(self, skill01);
+}
+void (*koTimer_orig)(MedicalSystem*) = NULL;
+void koTimer_hook(MedicalSystem* self)
+{
+    if (self && !kmp::ownerAllows(self->me, EntityState::UNCONSCIOUS | EntityState::DEAD)) { InterlockedIncrement(&kmp::g_koRefused); return; }
+    koTimer_orig(self);
+}
+void (*declareDead_orig)(Character*) = NULL;
+void declareDead_hook(Character* self)
+{
+    if (!kmp::ownerAllows(self, EntityState::DEAD)) { InterlockedIncrement(&kmp::g_deathRefused); return; }
+    declareDead_orig(self);
+}
+
+// --- No crimes between players ---------------------------------------------------------------
+// War, peace and alliances between players are the mod's business (diplomacy, assault_hostility),
+// not the town guards'. Every crime the engine records goes through BountyManager::setCrime, and
+// notifyCrimeWitnessed starts one too: both are refused when a player's character (ours, or a copy
+// of another player's) commits it against a player's faction (the real player faction or another
+// player's mirror faction). Same rule as Shared-Wastelands' pvp1 (MIT). Clearing (CRIME_NONE) and
+// crimes against world factions are untouched. Any thread: faction reads only.
+namespace kmp {
+    volatile LONG g_pvpCrimesRefused = 0;
+    bool isPlayerSideFaction(Faction* f)
+    {
+        if (!f) return false;
+        if (f->isThePlayer()) return true;
+        GameData* d = f->getData();
+        return d && strncmp(d->stringID.c_str(), "kenshimp_player_", 16) == 0;
+    }
+    bool safePvpCrime(BountyManager* b, Faction* against, bool* pvp)
+    {
+        __try
+        {
+            Character* c = b ? b->me : NULL;
+            *pvp = c && against && isPlayerSideFaction(c->getFaction()) && isPlayerSideFaction(against);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    bool isPvpCrime(BountyManager* b, int crime, Faction* against)
+    {
+        if (crime == CRIME_NONE || !ready()) return false;
+        bool pvp = false;
+        return safePvpCrime(b, against, &pvp) && pvp;
+    }
+}
+bool (*setCrime_orig)(BountyManager*, CrimeEnum, Faction*, const hand&) = NULL;
+bool setCrime_hook(BountyManager* self, CrimeEnum crime, Faction* against, const hand& who)
+{
+    if (kmp::isPvpCrime(self, (int)crime, against)) { InterlockedIncrement(&kmp::g_pvpCrimesRefused); return false; }
+    return setCrime_orig(self, crime, against, who);
+}
+void (*notifyCrime_orig)(BountyManager*, Faction*, const hand&, int, CrimeEnum) = NULL;
+void notifyCrime_hook(BountyManager* self, Faction* against, const hand& who, int expiry, CrimeEnum crime)
+{
+    if (kmp::isPvpCrime(self, (int)crime, against)) { InterlockedIncrement(&kmp::g_pvpCrimesRefused); return; }
+    notifyCrime_orig(self, against, who, expiry, crime);
+}
+
+// --- KenshiKin: crimes follow their owner into the host's world ---------------------------------
+// The crime a client's character is committing (Character::crimes: committingCrime, victim
+// faction, victim, expiry) is sent to the host 4 times a second while it changes or lasts; the
+// host's copy gets it through BountyManager::notifyCrimeWitnessed, so the host's NPCs - the only
+// ones with a working AI - see a thief, a lockpicker, a trespasser like anybody else. A cleared
+// crime is cleared with setCrime(CRIME_NONE). From Shared-Wastelands' crime3 (MIT).
+namespace kmp { namespace {
+    struct CrimeSent { int crime; std::string faction; TargetRef victim; float sampled; };   // sampled: expiry at the last tick
+    std::map<uint32_t, CrimeSent> g_crimeSent;
+    DWORD g_lastCrimeTick = 0;
+    const DWORD CRIME_PERIOD_MS = 250;
+    const float CRIME_RESET = 0.5f;   // expiry jumping up this much: the same crime committed again
+
+    bool safeReadCrime(Character* c, int* crime, Faction** f, RootObjectBase** victim, float* expiry)
+    {
+        __try
+        {
+            BountyManager& b = c->crimes;
+            *crime = (int)b.committingCrime;
+            *f = b.crimeAgainstFaction;
+            *victim = b.crimeAgainst.getRootObjectBase();
+            *expiry = b.crimeExpiry;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    bool safeApplyCrime(Character* c, int crime, Faction* f, const hand* victim, float expiry, int* now)
+    {
+        __try
+        {
+            if (crime == CRIME_NONE) c->crimes.setCrime(CRIME_NONE, NULL, hand());
+            else c->crimes.notifyCrimeWitnessed(f, *victim, (int)ceilf(expiry > 1.f ? expiry : 1.f), (CrimeEnum)crime);
+            *now = (int)c->crimes.committingCrime;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
+    void sendCrimes(DWORD now)
+    {
+        if (!g_cfg.theftSync || g_session.isHost() || npcs_ownWorld() || now - g_lastCrimeTick < CRIME_PERIOD_MS) return;
+        g_lastCrimeTick = now;
+        for (size_t k = 0; k < g_local.size(); ++k)
+        {
+            Character* c = g_local[k].h.getCharacter();
+            if (!c) continue;
+            int crime = 0; Faction* f = NULL; RootObjectBase* v = NULL; float expiry = 0;
+            if (!safeReadCrime(c, &crime, &f, &v, &expiry) || crime < CRIME_NONE || crime >= CRIME_END) continue;
+            CrimeSent cur; cur.crime = crime; cur.sampled = expiry;
+            cur.faction = f && f->getData() ? f->getData()->stringID : std::string();
+            if (crime != CRIME_NONE && isPlayerSideFaction(f)) crime = CRIME_NONE;   // between players: not the guards' business
+            cur.crime = crime;
+            if (crime != CRIME_NONE) cur.victim = makeTargetRef(v);
+            std::map<uint32_t, CrimeSent>::iterator it = g_crimeSent.find(g_local[k].id);
+            bool had = it != g_crimeSent.end() && it->second.crime != CRIME_NONE;
+            if (crime == CRIME_NONE && !had) continue;
+            // A change, or the same crime set again (Shared-Wastelands' CrimeShouldSend): notifyCrimeWitnessed is the
+            // engine's "commits a crime" entry, so it is never repeated for one act (witnesses react through their senses).
+            bool changed = it == g_crimeSent.end() || it->second.crime != crime || it->second.faction != cur.faction ||
+                           it->second.victim != cur.victim || (crime != CRIME_NONE && expiry > it->second.sampled + CRIME_RESET);
+            if (it != g_crimeSent.end()) it->second.sampled = expiry;
+            if (!changed) continue;
+            g_crimeSent[g_local[k].id] = cur;
+            ByteWriter w; w.u8(HOST_ID); w.u32(g_local[k].id); w.u8((uint8_t)crime); w.str(cur.faction); cur.victim.write(w); w.f32(expiry);
+            g_session.sendTo(HOST_ID, MSG_CRIME, w.data);
+            if (changed) log("crime: our %08x %s (against '%s'), told the host", g_local[k].id, crime ? BountyManager::crimeToStr((CrimeEnum)crime).c_str() : "cleared", cur.faction.c_str());
+        }
+    }
+
+    void onCrimeMessage(const NetEvent& e, ByteReader& r)
+    {
+        uint8_t target = r.u8();
+        uint32_t id = r.u32();
+        int crime = r.u8();
+        std::string fsid = r.str();
+        TargetRef victim; victim.read(r);
+        float expiry = clampF(r.f32(), 0.f, 1.0e6f);
+        if (!r.ok() || !g_session.isHost() || target != HOST_ID || netIdOwner(id) != e.sender || crime >= CRIME_END || npcs_clientOwnWorld(e.sender)) return;
+        Character* c = chars_byNetId(id);
+        if (!c || !chars_isGhost(c)) return;
+        Faction* f = fsid.empty() ? NULL : ou->factionMgr->getFactionByStringID(fsid);
+        RootObject* v = resolveTargetRef(victim);
+        hand vh; if (v) vh = hand(v);
+        int now = -1;
+        bool ok;
+        { ApplyingOwner a; ok = safeApplyCrime(c, crime, f, &vh, expiry, &now); }
+        static DWORD lastLog = 0;
+        if (!ok || crime == CRIME_NONE || now != crime || GetTickCount() - lastLog > 5000)
+        {
+            lastLog = GetTickCount();
+            log("crime of %s's %08x: %s against '%s' %s (copy now %d)", playerName(e.sender).c_str(), id,
+                crime ? BountyManager::crimeToStr((CrimeEnum)crime).c_str() : "cleared", fsid.c_str(), ok ? "applied" : "FAILED", now);
+        }
+    }
+} }
 
 // --- hook: AI::periodicUpdate --------------------------------------------------------------
 // Out of combat, ghosts never pick their own tasks: they only execute what we mirror from their
@@ -2759,19 +3419,19 @@ bool chars_install()
     bool ok = true;
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&MedicalSystem::HealthPartStatus::applyDamage),
                                                  applyDamage_hook, &applyDamage_orig))
-    { ErrorLog("KenshiMP: could not hook applyDamage!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook applyDamage!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(MedicalAccess::address()),
                                                  medApply_hook, &medApply_orig))
-    { ErrorLog("KenshiMP: could not hook MedicalSystem::applyDamage!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook MedicalSystem::applyDamage!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&CombatClass::_getHit),
                                                  getHit_hook, &getHit_orig))
-    { ErrorLog("KenshiMP: could not hook CombatClass::_getHit!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook CombatClass::_getHit!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&Character::_NV_hitByMeleeAttack),
                                                  charHit_hook, &charHit_orig))
-    { ErrorLog("KenshiMP: could not hook Character::hitByMeleeAttack!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook Character::hitByMeleeAttack!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&GunClass::shoot),
                                                  gunShoot_hook, &gunShoot_orig))
-    { ErrorLog("KenshiMP: could not hook GunClass::shoot!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook GunClass::shoot!"); ok = false; }
     if (g_cfg.ghostNoCollide)
     {
         if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&CombatMovementController::checkWeDontCollideWithCharacters),
@@ -2783,20 +3443,39 @@ bool chars_install()
         log("hook Character::isImmuneToOffscreenMode failed (off-screen ghosts update coarsely)");
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&Character::addOrder),
                                                  addOrder_hook, &addOrder_orig))
-    { ErrorLog("KenshiMP: could not hook Character::addOrder!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook Character::addOrder!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&Character::_NV_setFaction),
                                                  setFaction_hook, &setFaction_orig))
-    { ErrorLog("KenshiMP: could not hook Character::setFaction!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook Character::setFaction!"); ok = false; }
     // Render layer (not fatal if missing: falls back to teleportVisuallyOnly).
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress((SetPos1)&AnimationClass::setPosition), animSetPos1_hook, &animSetPos1_orig))
-        ErrorLog("KenshiMP: could not hook AnimationClass::setPosition(pos)");
+        ErrorLog("KenshiKin: could not hook AnimationClass::setPosition(pos)");
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress((SetPosQ)&AnimationClass::setPosition), animSetPosQ_hook, &animSetPosQ_orig))
-        ErrorLog("KenshiMP: could not hook AnimationClass::setPosition(pos, quat)");
+        ErrorLog("KenshiKin: could not hook AnimationClass::setPosition(pos, quat)");
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress((SetPosV)&AnimationClass::setPosition), animSetPosV_hook, &animSetPosV_orig))
-        ErrorLog("KenshiMP: could not hook AnimationClass::setPosition(pos, dir)");
+        ErrorLog("KenshiKin: could not hook AnimationClass::setPosition(pos, dir)");
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&AI::_NV_periodicUpdate),
                                                  aiPeriodic_hook, &aiPeriodic_orig))
-    { ErrorLog("KenshiMP: could not hook AI::periodicUpdate!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook AI::periodicUpdate!"); ok = false; }
+    // KenshiKin (optional: the rest works without them)
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&MedicalSystem::knockout), knockout_hook, &knockout_orig))
+        log("hook MedicalSystem::knockout failed (copies may get knocked out on their own)");
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&MedicalSystem::startKnockoutTimer), koTimer_hook, &koTimer_orig))
+        log("hook MedicalSystem::startKnockoutTimer failed (copies may get knocked out on their own)");
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&Character::declareDead), declareDead_hook, &declareDead_orig))
+        log("hook Character::declareDead failed (copies may die on their own)");
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&BountyManager::setCrime), setCrime_hook, &setCrime_orig))
+        log("hook BountyManager::setCrime failed (crimes between players not filtered)");
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&BountyManager::notifyCrimeWitnessed), notifyCrime_hook, &notifyCrime_orig))
+        log("hook BountyManager::notifyCrimeWitnessed failed (crimes between players not filtered)");
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&Character::pickupObject), pickup_hook, &pickup_orig))
+        log("hook Character::pickupObject failed (carrying other players' characters not shared)");
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&Character::dropCarriedObject), dropCarried_hook, &dropCarried_orig))
+        log("hook Character::dropCarriedObject failed (putting down other players' characters not shared)");
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&MedicalSystem::applyFirstAid), firstAid_hook, &firstAid_orig))
+        log("hook MedicalSystem::applyFirstAid failed (first aid on other players' characters not shared)");
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&MedicalSystem::applyDoctoring), doctoring_hook, &doctoring_orig))
+        log("hook MedicalSystem::applyDoctoring failed (doctoring on other players' characters not shared)");
     return ok;
 }
 }

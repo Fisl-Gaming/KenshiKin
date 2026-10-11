@@ -26,6 +26,7 @@
 #include <kenshi/GameDataManager.h>
 #include <kenshi/RootObjectFactory.h>
 #include <kenshi/Inventory.h>
+#include <kenshi/Faction.h>
 #include <kenshi/Platoon.h>
 #include <kenshi/Item.h>
 #include <kenshi/Building/Building.h>
@@ -343,6 +344,151 @@ namespace
         log("trade with %s: %08x money %d -> %d", playerName(sender).c_str(), id, have, now);
     }
 
+    // KenshiKin: thefts in the host's world. Upstream nobody ever reacted: on the client the NPCs are
+    // AI-less copies (they turn their heads, nothing more), and on the host the item only left the
+    // container through the network, so the host's NPCs never saw a crime.
+    //  Client: the engine's own theft check runs on our thief (Character::ImStealingDoYouNotice,
+    //          hooked); we tell the host what was taken from where (MSG_THEFT) before the transfer
+    //          itself (same ordered connection), so the item is still in the host's container.
+    //  Host  : the same check runs on its copy of the thief, in front of its NPCs. The crime state
+    //          itself follows the owner's character through MSG_CRIME (Characters.cpp, v1021), so the
+    //          host's guards react as they would to anyone; the bounty reaches the owner (Bounties.cpp).
+    volatile LONG g_judgingThread = 0;      // thread of our own call into the engine check (no forwarding)
+    int g_theftFailures = 0;
+
+    bool safeEngineTheft(Character* thief, RootObject* from, Item* it, bool* noticed)
+    {
+        __try { *noticed = thief->ImStealingDoYouNotice(from, it); return true; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
+    // Client side, from the hook.
+    void onLocalTheft(Character* thief, RootObject* from, GameData* itemData, bool noticed)
+    {
+        if (!g_cfg.theftSync || !ready() || g_session.isHost() || npcs_ownWorld() || !thief || !from || !itemData) return;
+        uint32_t thiefId = chars_netIdOf(thief);
+        if (!thiefId || netIdOwner(thiefId) != g_session.localId() || chars_isGhost(thief)) return;
+        uint8_t kind = 0xFF; uint32_t id = 0;
+        hand h(from);
+        if (h.type == BUILDING)
+        {
+            Building* b = h.getBuilding();
+            for (std::map<uint32_t, WorldBox>::iterator w = g_boxes.begin(); w != g_boxes.end(); ++w)
+                if (w->second.h.getBuilding() == b) { kind = CONTAINER_WORLD; id = w->first; break; }
+        }
+        else if (h.type == CHARACTER || h.type == ANIMAL_CHARACTER)
+        {
+            uint32_t g = chars_netIdOf(h.getCharacter());
+            if (g && isNpcNetId(g)) { kind = CONTAINER_CHARACTER; id = g; }
+        }
+        if (kind == 0xFF)
+        {
+            static DWORD lastLog = 0;
+            if (GetTickCount() - lastLog > 10000) { lastLog = GetTickCount(); log("theft: taken from something the host does not share (type %d), judged here only", (int)h.type); }
+            return;
+        }
+        ByteWriter w; w.u8(HOST_ID); w.u8(kind); w.u32(id); w.u32(thiefId); w.str(itemData->stringID); w.u8(noticed ? 1 : 0);
+        g_session.sendTo(HOST_ID, MSG_THEFT, w.data);
+        log("theft: %s from %08x (%s here), sent to the host", itemData->stringID.c_str(), id, noticed ? "noticed" : "unnoticed");
+    }
+
+    // Host side.
+    void onTheftMessage(const NetEvent& e)
+    {
+        if (!g_cfg.theftSync || !g_session.isHost() || g_theftFailures > 5) return;
+        ByteReader r(e.body);
+        uint8_t target = r.u8(), kind = r.u8();
+        uint32_t id = r.u32(), thiefId = r.u32();
+        std::string sid = r.str();
+        bool noticedThere = r.u8() != 0;
+        if (!r.ok() || target != HOST_ID || netIdOwner(thiefId) != e.sender || npcs_clientOwnWorld(e.sender)) return;
+        Character* thief = chars_byNetId(thiefId);
+        RootObject* from = NULL;
+        bool fromCharacter = false;
+        if (kind == CONTAINER_WORLD)
+        {
+            std::map<uint32_t, WorldBox>::iterator w = g_boxes.find(id);
+            if (w != g_boxes.end()) from = boxBuilding(w->second);
+        }
+        else if (kind == CONTAINER_CHARACTER && isNpcNetId(id)) { from = npcs_byNetId(id); fromCharacter = true; }
+        if (!thief || !from) { log("theft by %s: thief %08x or container %08x not found here", playerName(e.sender).c_str(), thiefId, id); return; }
+        Inventory* inv = inventoryOf(kind, id);
+        Item* it = NULL;
+        std::vector<Item*> all;
+        if (inv && safeSnapshot(inv, &all))
+            for (size_t i = 0; i < all.size() && !it; ++i) if (all[i] && all[i]->data && all[i]->data->stringID == sid) it = all[i];
+        bool noticedHere = false, ran = false;
+        if (it)
+        {
+            g_judgingThread = (LONG)GetCurrentThreadId();
+            ran = safeEngineTheft(thief, from, it, &noticedHere);
+            g_judgingThread = 0;
+            if (!ran) ++g_theftFailures;
+        }
+        // The crime itself reaches our copy of the thief through MSG_CRIME (Characters.cpp): no second one here.
+        (void)fromCharacter;
+        log("theft by %s: %s from %08x - engine check here %s (%s), on its screen %s",
+            playerName(e.sender).c_str(), sid.c_str(), id, !it ? "skipped (item not found)" : (ran ? "ran" : "FAILED"),
+            noticedHere ? "seen" : "unseen", noticedThere ? "seen" : "unseen");
+    }
+
+    // KenshiKin 1021b: a client taking from a town container of the host's world. Seen in play: the
+    // client's own engine does not count it as a theft at all (its loot window shows the mod's copy
+    // of the host's content), so neither its theft check nor its crime state ever fires. The host
+    // has the real container and its owner: if that owner is not the thief's faction (nor a
+    // player's), the host's copy of the thief starts committing a theft (notifyCrimeWitnessed,
+    // 30 game seconds) and the host's NPCs who see it react through their own senses.
+    const int BOX_THEFT_SECONDS = 30;
+    bool safeBoxOwner(Building* b, Faction** owner)
+    {
+        __try { *owner = b->owner; return true; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    bool safeCommitTheft(Character* thief, Faction* victim, const hand* where, int* now)
+    {
+        __try
+        {
+            thief->crimes.notifyCrimeWitnessed(victim, *where, BOX_THEFT_SECONDS, CRIME_STEALING);
+            *now = (int)thief->crimes.committingCrime;
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    bool isPlayersFaction(Faction* f)
+    {
+        if (!f) return true;
+        if (f->isThePlayer()) return true;
+        GameData* d = f->getData();
+        return d && d->stringID.compare(0, 16, "kenshimp_player_") == 0;
+    }
+    void hostBoxTheft(uint8_t sender, uint32_t id, const std::string& what)
+    {
+        if (!g_cfg.theftSync || !g_session.isHost()) return;
+        std::map<uint32_t, WorldBox>::iterator w = g_boxes.find(id);
+        Building* box = w == g_boxes.end() ? NULL : boxBuilding(w->second);
+        if (!box) { log("theft check: container %08x not found here", id); return; }
+        Faction* owner = NULL;
+        safeBoxOwner(box, &owner);
+        std::vector<Character*> theirs;
+        cs_ghostCharacters(sender, theirs);
+        Character* thief = NULL; float best = 1e30f;
+        Ogre::Vector3 p = box->getPosition();
+        for (size_t i = 0; i < theirs.size(); ++i) { float dd = theirs[i]->getPosition().distance(p); if (dd < best) { best = dd; thief = theirs[i]; } }
+        std::string ownerName = owner && owner->getData() ? owner->getData()->stringID : std::string("none");
+        if (!thief) { log("theft check: %s's character not found next to %s", playerName(sender).c_str(), box->data ? box->data->stringID.c_str() : "?"); return; }
+        if (isPlayersFaction(owner) || owner == thief->getFaction())
+        {
+            static DWORD lastLog = 0;
+            if (GetTickCount() - lastLog > 10000) { lastLog = GetTickCount(); log("theft check: %s took %s from a container of '%s': not a theft", playerName(sender).c_str(), what.c_str(), ownerName.c_str()); }
+            return;
+        }
+        hand where(box);
+        int now = -1;
+        bool ok = safeCommitTheft(thief, owner, &where, &now);
+        log("theft check: %s took %s from a container of '%s' (%.0f units away) -> %s, its copy now commits crime %d",
+            playerName(sender).c_str(), what.c_str(), ownerName.c_str(), best, ok ? "THEFT" : "engine call FAILED", now);
+    }
+
     void applyTake(uint8_t sender, uint8_t kind, uint32_t id, const InvItem& d)
     {
         if (d.item == MONEY_ITEM) { if (kind == CONTAINER_CHARACTER) applyMoney(sender, id, -d.quantity); return; }
@@ -374,6 +520,7 @@ namespace
             sendUndo(sender, UNDO_REMOVE, kind, id, d);   // someone else was faster
             return;
         }
+        if (kind == CONTAINER_WORLD) hostBoxTheft(sender, id, d.item);   // before it leaves the container
         int left = d.quantity > 0 ? d.quantity : 1, n = 0;
         for (size_t i = 0; i < loose.size() && left > 0; ++i)
         {
@@ -857,6 +1004,7 @@ void items_worldForget(uint8_t player)
 void items_onMessage(const NetEvent& e)
 {
     if (e.msgType == MSG_WORLD_CONTAINER) { onBoxEvent(e); return; }
+    if (e.msgType == MSG_THEFT) { onTheftMessage(e); return; }
     ByteReader r(e.body);
     if (e.msgType == MSG_INVENTORY)
     {
@@ -1099,9 +1247,36 @@ std::string items_debugBackpack(Character* taker)
     return "no remote backpack within reach";
 }
 
+void items_allOf(Inventory* inv, std::vector<Item*>& out)
+{
+    if (inv) safeSnapshot(inv, &out);
+}
+
+// Main thread (hook events, Characters.cpp).
+void items_onLocalTheft(Character* thief, RootObject* from, GameData* item, bool noticed) { onLocalTheft(thief, from, item, noticed); }
+
+} // namespace kmp
+
+// KenshiKin: Character::ImStealingDoYouNotice, the engine's own theft check, run on the thief when
+// a player takes something that is not theirs. A client in the host's world tells the host, whose
+// copy of the thief goes through the same check in front of the host's NPCs (see onTheftMessage).
+bool (*steal_orig)(Character*, RootObject*, Item*) = NULL;
+bool steal_hook(Character* self, RootObject* from, Item* item)
+{
+    bool noticed = steal_orig(self, from, item);
+    // Any thread: only recorded here, handled by the main loop (kmp::hooks_post).
+    if (kmp::g_judgingThread != (LONG)GetCurrentThreadId() && self && from && item && kmp::ready())
+        kmp::hooks_post(kmp::HOOK_THEFT, self, from, noticed, 0, 0, item->data);
+    return noticed;
+}
+
+namespace kmp {
 bool items_install()
 {
-    return true;   // no engine hook: transfers are detected by comparing snapshots (items_tick)
+    // Transfers are detected by comparing snapshots (items_tick); the theft hook is optional.
+    if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&Character::_NV_ImStealingDoYouNotice), steal_hook, &steal_orig))
+        log("hook Character::ImStealingDoYouNotice failed (thefts in the host's world not judged by its NPCs)");
+    return true;
 }
 
 } // namespace kmp

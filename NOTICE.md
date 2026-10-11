@@ -1,10 +1,14 @@
 # Third-party notices
 
-KenshiMP is free software, licensed under the **GNU General Public License v3** (see `LICENSE`).
-Copyright (C) the KenshiMP authors.
+KenshiKin is a fork of [KenshiMP](https://github.com/xemou/KenshiMP). Both are free software, licensed under
+the **GNU General Public License v3** (see `LICENSE`).
+Copyright (C) the KenshiMP authors; the KenshiKin changes were written by an AI model (Claude, Anthropic) for
+the KenshiKin project.
 
-KenshiMP is an unofficial fan project. It is not affiliated with, endorsed by or sponsored by
-Lo-Fi Games. *Kenshi* is a trademark / property of Lo-Fi Games.
+KenshiKin is an unofficial fan project. It is not affiliated with, endorsed by or sponsored by Lo-Fi Games,
+the KenshiMP authors or Anthropic. *Kenshi* is a trademark / property of Lo-Fi Games.
+
+The sections below are KenshiMP's notice (names updated to the fork's files).
 
 ## What the mod is built on
 
@@ -37,4 +41,16 @@ GPLv3 and **its complete corresponding source code is published** at
 stock Steam 1.0.68 table, under the name KenshiLib looks for), `gui/core/core_settings.xml` (the
 game's two interface settings plus the MyGUI plugin entry that starts the loader), `KenshiMP.mod`,
 `RE_Kenshi.json`, `kenshimp.cfg` (default template),
-`README.md`, `GUIDE.md`, `GUIDE_FR.md`, `RISKS.md`, `LICENSE`, `NOTICE.md`.
+`README.md`, `README.ru.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE.md`.
+
+## KenshiKin fork: ideas from other Kenshi co-op projects
+
+KenshiKin (this fork) re-implemented, in its own code, approaches documented by other open Kenshi co-op
+projects. No source file was copied from them.
+
+| Project | License | What KenshiKin took (as an approach) |
+|---|---|---|
+| [nhoral/KenshiCoop](https://github.com/nhoral/KenshiCoop) | AGPL-3.0 | body-state flags (posture, carried, bed, cage, chained), down enforcement (knock down / hold / revive), carried-body sync, bed / prison placement |
+| [Melaus123/Shared-Wastelands](https://github.com/Melaus123/Shared-Wastelands) | MIT | engine hooks run on the AI worker thread; knockout / death refused on copies; crime state replicated owner -> copy through notifyCrimeWitnessed, sent on change or re-set |
+| [LRaverdy/KenshiCoop](https://github.com/LRaverdy/KenshiCoop) | none stated | idea only: clients' log lines on the host, host console window, resync |
+

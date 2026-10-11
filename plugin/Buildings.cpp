@@ -634,13 +634,13 @@ bool builds_install()
     bool ok = true;
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&RootObjectFactory::createBuilding),
                                                  createBuilding_hook, &createBuilding_orig))
-    { ErrorLog("KenshiMP: could not hook createBuilding!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook createBuilding!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&Building::_NV_addDismantleProgress),
                                                  dismantle_hook, &dismantle_orig))
-    { ErrorLog("KenshiMP: could not hook addDismantleProgress!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook addDismantleProgress!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&DoorStuff::_NV_hitByMeleeAttack),
                                                  doorHit_hook, &doorHit_orig))
-    { ErrorLog("KenshiMP: could not hook DoorStuff::hitByMeleeAttack!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook DoorStuff::hitByMeleeAttack!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&DoorStuff::_NV_setBroken), doorSetBroken_hook, &doorSetBroken_orig))
         log("hook DoorStuff::setBroken failed (town doors not synced)");
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&Building::_NV_setDestroyed), setDestroyed_hook, &setDestroyed_orig))

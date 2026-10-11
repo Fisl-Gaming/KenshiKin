@@ -419,12 +419,12 @@ public:
                 // Plain words for the player (the version is the protocol number, shown in the
                 // multiplayer window's title), and who has to update. The host is told too.
                 char msg[320];
-                sprintf_s(msg, sizeof(msg), "KenshiMP version mismatch: the host has v%u, you have v%u. %s", PROTOCOL_VERSION, ver,
-                          ver < PROTOCOL_VERSION ? "Update KenshiMP: restart Steam so it downloads the new version (or unsubscribe and subscribe again)."
-                                                 : "The host must update KenshiMP (restart Steam, or unsubscribe and subscribe again).");
+                sprintf_s(msg, sizeof(msg), "KenshiKin version mismatch: the host has v%u, you have v%u. %s", PROTOCOL_VERSION, ver,
+                          ver < PROTOCOL_VERSION ? "Update KenshiKin: install the same release as the host (GitHub releases page)."
+                                                 : "The host must update KenshiKin to the same release as you.");
                 reject(c, msg);
                 char host[200];
-                sprintf_s(host, sizeof(host), "%s could not join: KenshiMP version mismatch (they have v%u, you have v%u)",
+                sprintf_s(host, sizeof(host), "%s could not join: KenshiKin version mismatch (they have v%u, you have v%u)",
                           name.empty() ? "A player" : name.substr(0, 40).c_str(), ver, PROTOCOL_VERSION);
                 NetEvent w; w.kind = NetEvent::EV_WARNING; w.text = host; push(w);
                 return;
@@ -518,7 +518,7 @@ public:
         if (!isRelayed(type)) return;
 
         uint8_t sender = c->playerId;
-        if (type == MSG_DAMAGE || type == MSG_BUILDING_DAMAGE || type == MSG_ITEM_TAKE || type == MSG_ITEM_GIVE || type == MSG_GROUND_TAKE || type == MSG_TRADE || type == MSG_ITEM_UNDO || type == MSG_ZONE_MODE || type == MSG_WORLD_STATE_REPORT || type == MSG_WORLD_BUILDING_REPORT || type == MSG_BOUNTY_CRIME || type == MSG_WORLD_CONTAINER)
+        if (type == MSG_DAMAGE || type == MSG_BUILDING_DAMAGE || type == MSG_ITEM_TAKE || type == MSG_ITEM_GIVE || type == MSG_GROUND_TAKE || type == MSG_TRADE || type == MSG_ITEM_UNDO || type == MSG_ZONE_MODE || type == MSG_WORLD_STATE_REPORT || type == MSG_WORLD_BUILDING_REPORT || type == MSG_BOUNTY_CRIME || type == MSG_WORLD_CONTAINER || type == MSG_DOOR_REPORT || type == MSG_THEFT || type == MSG_CARRY || type == MSG_FIRST_AID || type == MSG_CRIME || type == MSG_LOG)
         {
             if (body.empty()) return;
             uint8_t target = body[0];

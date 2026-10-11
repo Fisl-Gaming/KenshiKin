@@ -57,7 +57,7 @@ namespace
             int w = view.width / 3 < 420 ? 420 : view.width / 3;
             int h = 8 * 22 + 8;
             g_log = gui->createWidget<MyGUI::EditBox>("Kenshi_WordWrapEmpty",
-                MyGUI::IntCoord(20, (int)(view.height * 0.62f) - h - 4, w, h), MyGUI::Align::Default, "Main", "KenshiMP_ChatLog");
+                MyGUI::IntCoord(20, (int)(view.height * 0.62f) - h - 4, w, h), MyGUI::Align::Default, "Main", "KenshiKin_ChatLog");
             if (!g_log) return false;
             g_log->setEditMultiLine(true);
             g_log->setEditWordWrap(true);
@@ -114,7 +114,7 @@ namespace
             const MyGUI::IntSize& view = MyGUI::RenderManager::getInstance().getViewSize();
             int w = view.width / 3 < 420 ? 420 : view.width / 3;
             g_box = gui->createWidget<MyGUI::EditBox>("Kenshi_EditBox", MyGUI::IntCoord(20, (int)(view.height * 0.62f), w, 34),
-                                                      MyGUI::Align::Default, "Popup", "KenshiMP_Chat");
+                                                      MyGUI::Align::Default, "Popup", "KenshiKin_Chat");
             if (!g_box) return false;
             g_box->setMaxTextLength(MAX_CHAT);
             g_box->setEditMultiLine(false);
@@ -196,6 +196,17 @@ namespace
             chat_notice(done);
             return;
         }
+        if (cmd == "/resync")   // KenshiKin: "/resync" (us), "/resync all" or "/resync <player>" (host)
+        {
+            showMessage(mp_resync(arg));
+            return;
+        }
+        if (cmd == "/console")  // KenshiKin: the host console window
+        {
+            if (!g_session.isHost()) { showMessage(T("Only the host has a console.")); return; }
+            logs_openConsole();
+            return;
+        }
         if (cmd == "/goto" || cmd == "/aller")
         {
             // No name: the host (clients), or the only other player.
@@ -224,7 +235,7 @@ namespace
             diplomacy_set(who, value);
             return;
         }
-        showMessage(T("Commands: /players, /war <player|all>, /peace <player|all>, /ally <player|all>, /goto [player], /report"));
+        showMessage(T("Commands: /players, /war <player|all>, /peace <player|all>, /ally <player|all>, /goto [player], /resync [all|player], /console, /report"));
     }
 }
 

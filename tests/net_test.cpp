@@ -73,6 +73,18 @@ static void serialisationTests()
     EntityState es2; es2.read(r5);
     CHECK(r5.ok() && r5.remaining() == 0 && es2.flesh.size() == 2 && es2.flesh[1] == -20.5f && es2.blood == 180);
     CHECK(es2.combatTarget == es.combatTarget && es2.taskSubject == es.taskSubject && es2.task == 87 && es2.moveSpeed == 2);
+    // KenshiKin 1021: posture, bed / cage occupancy and the furniture travel with the state
+    es.flags |= EntityState::STEALTH | EntityState::CARRIED;
+    es.body = (uint8_t)(2 | (2 << EntityState::OCC_SHIFT) | EntityState::CHAINED);
+    es.furniture.kind = TargetRef::WORLD_BUILDING; es.furniture.sid = "77-cage.mod"; es.furniture.x = 10; es.furniture.y = 2; es.furniture.z = -3;
+    ByteWriter w5b; es.write(w5b);
+    ByteReader r5b(w5b.data);
+    EntityState es3; es3.read(r5b);
+    CHECK(r5b.ok() && r5b.remaining() == 0 && es3.sanitize());
+    CHECK(es3.prone() == 2 && es3.occupancy() == 2 && (es3.body & EntityState::CHAINED) && es3.furniture == es.furniture);
+    CHECK((es3.flags & EntityState::STEALTH) && (es3.flags & EntityState::CARRIED));
+    es3.body = 7 | (3 << EntityState::OCC_SHIFT);   // out of range: cleared by sanitize
+    CHECK(es3.sanitize() && es3.prone() == 0 && es3.occupancy() == 0);
 
     BuildingMsg bm; bm.netId = 1; bm.doors.push_back(BuildingMsg::DOOR_BROKEN); bm.doors.push_back(BuildingMsg::DOOR_LOCKED); bm.destroyed = 1;
     ByteWriter w6; bm.write(w6);

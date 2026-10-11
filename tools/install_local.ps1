@@ -1,13 +1,13 @@
-# Copies dist\KenshiMP into <Kenshi>\mods\KenshiMP for the Game Editor's Workshop upload, keeping
-# the files the editor owns there: KenshiMP.mod (it stores the item's info in it), _KenshiMP.info
-# (Workshop item id, title, tags, visibility) and _KenshiMP.img (preview). Removes package files that
+# Copies dist\KenshiKin into <Kenshi>\mods\KenshiKin for the Game Editor's Workshop upload, keeping
+# the files the editor owns there: KenshiKin.mod (it stores the item's info in it), _KenshiKin.info
+# (Workshop item id, title, tags, visibility) and _KenshiKin.img (preview). Removes package files that
 # no longer exist in dist. Refuses while the game is running.
 param([string]$Game = "C:\Program Files (x86)\Steam\steamapps\common\Kenshi")
 $ErrorActionPreference = "Stop"
-$dist = (Resolve-Path "$PSScriptRoot\..\dist\KenshiMP").Path
-$dst = Join-Path $Game "mods\KenshiMP"
+$dist = (Resolve-Path "$PSScriptRoot\..\dist\KenshiKin").Path
+$dst = Join-Path $Game "mods\KenshiKin"
 if (Get-Process Kenshi_x64 -ErrorAction SilentlyContinue) { Write-Host "Kenshi is running: close it first."; exit 1 }
-$keep = 'KenshiMP.mod', '_KenshiMP.info', '_KenshiMP.img'
+$keep = 'KenshiKin.mod', '_KenshiKin.info', '_KenshiKin.img'
 New-Item -ItemType Directory -Force $dst | Out-Null
 # stale package files (not in dist, not owned by the editor)
 Get-ChildItem $dst -Recurse -File | ForEach-Object {

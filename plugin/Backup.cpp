@@ -1,6 +1,6 @@
 // Host save backup: the host's save holds the shared world, so a multiplayer bug could damage it.
 // Each time a hosted game is ready (loaded, players resynced), its save folder is copied once to
-// %LOCALAPPDATA%\kenshi\KenshiMP\backups\<save>_<date>\ (backup_saves=N keeps the last N copies of
+// %LOCALAPPDATA%\kenshi\KenshiKin\backups\<save>_<date>\ (backup_saves=N keeps the last N copies of
 // each save, 0 = off). The copy runs on its own thread (saves are tens of MB): the game never waits.
 // Only fields of the engine's SaveManager are read (no extra engine function, so nothing to add to
 // the address tables); the folder is looked up in both places Kenshi keeps saves.
@@ -156,7 +156,7 @@ void backup_tick()
     if (!g_finished) return;
     InterlockedExchange(&g_finished, 0);
     log("%s", g_result.c_str());
-    if (g_result.find("failed") == std::string::npos) chat_notice(T("Your save was backed up (KenshiMP\\backups)."));
+    if (g_result.find("failed") == std::string::npos) chat_notice(T("Your save was backed up (KenshiKin\\backups)."));
 }
 
 } // namespace kmp

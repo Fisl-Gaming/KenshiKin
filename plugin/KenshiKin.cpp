@@ -1,4 +1,4 @@
-// KenshiMP - RE_Kenshi plugin entry point: config, session, player/faction management, main loop.
+// KenshiKin - RE_Kenshi plugin entry point: config, session, player/faction management, main loop.
 //
 // Each player simulates his own squad, faction and buildings. Remote squads and buildings are
 // mirrored locally as "ghosts" owned by one local faction per remote player (Characters.cpp,
@@ -65,16 +65,16 @@ namespace
 
     bool toBool(const std::string& v) { return v == "1" || v == "true" || v == "yes" || v == "on"; }
 
-    // Where the settings live. The mod's own folder can be anywhere (Kenshi/mods/KenshiMP, or the
+    // Where the settings live. The mod's own folder can be anywhere (Kenshi/mods/KenshiKin, or the
     // Steam Workshop folder, which Steam overwrites on every update), so the player's settings are
-    // kept in %LOCALAPPDATA%\kenshi\KenshiMP\kenshimp.cfg, next to the game's saves. The first time,
+    // kept in %LOCALAPPDATA%\kenshi\KenshiKin\kenshikin.cfg, next to the game's saves. The first time,
     // that file is copied from the one shipped with the mod (or from an older install's).
     std::string modDir()
     {
         HMODULE self = NULL;
         char path[MAX_PATH] = { 0 };
         if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                (LPCSTR)&modDir, &self) || !GetModuleFileNameA(self, path, MAX_PATH)) return "mods\\KenshiMP\\";
+                                (LPCSTR)&modDir, &self) || !GetModuleFileNameA(self, path, MAX_PATH)) return "mods\\KenshiKin\\";
         std::string p = path;
         size_t slash = p.find_last_of("\\/");
         return slash == std::string::npos ? std::string() : p.substr(0, slash + 1);
@@ -84,17 +84,17 @@ namespace
     {
         char base[MAX_PATH] = { 0 };
         size_t n = 0;
-        if (getenv_s(&n, base, sizeof(base), "LOCALAPPDATA") != 0 || n <= 1) return "mods\\KenshiMP\\kenshimp.cfg";
+        if (getenv_s(&n, base, sizeof(base), "LOCALAPPDATA") != 0 || n <= 1) return "mods\\KenshiKin\\kenshikin.cfg";
         std::string dir = std::string(base) + "\\kenshi";
         CreateDirectoryA(dir.c_str(), NULL);
-        dir += "\\KenshiMP";
+        dir += "\\KenshiKin";
         CreateDirectoryA(dir.c_str(), NULL);
-        return dir + "\\kenshimp.cfg";
+        return dir + "\\kenshikin.cfg";
     }
 
     bool fileExists(const std::string& p) { DWORD a = GetFileAttributesA(p.c_str()); return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY); }
 
-    // Host: player numbers by name, kept between sessions (players.cfg next to kenshimp.cfg). A
+    // Host: player numbers by name, kept between sessions (players.cfg next to kenshikin.cfg). A
     // player's number names its faction and characters in the host's save, so a friend coming
     // back after the host restarted gets the same number, not the one of whoever joined first.
     std::string slotsPath()
@@ -128,7 +128,7 @@ namespace
         std::map<std::string, uint8_t> slots = g_session.knownSlots();
         FILE* f = NULL;
         if (fopen_s(&f, slotsPath().c_str(), "w") != 0 || !f) return;
-        fprintf(f, "# KenshiMP host: player number and name of everybody who joined (kept for returning players)\n");
+        fprintf(f, "# KenshiKin host: player number and name of everybody who joined (kept for returning players)\n");
         for (std::map<std::string, uint8_t>::iterator it = slots.begin(); it != slots.end(); ++it)
             if (it->first.find('\n') == std::string::npos) fprintf(f, "%d %s\n", (int)it->second, it->first.c_str());
         fclose(f);
@@ -139,7 +139,7 @@ namespace
     {
         std::string user = userConfigPath();
         if (fileExists(user)) return user;
-        const std::string templates[] = { "mods\\KenshiMP\\kenshimp.cfg", modDir() + "kenshimp.cfg", "kenshimp.cfg" };
+        const std::string templates[] = { "mods\\KenshiKin\\kenshikin.cfg", modDir() + "kenshikin.cfg", "kenshikin.cfg" };
         for (int i = 0; i < 3; ++i)
             if (fileExists(templates[i]))
             {
@@ -149,12 +149,12 @@ namespace
         return user;
     }
 
-    // kenshimp.cfg (key=value, '#' comments), see configPath().
+    // kenshikin.cfg (key=value, '#' comments), see configPath().
     void loadConfig()
     {
         FILE* f = NULL;
         std::string path = configPath();
-        if (fopen_s(&f, path.c_str(), "r") != 0 || !f) { ErrorLog("KenshiMP: kenshimp.cfg not found (" + path + "), multiplayer disabled"); return; }
+        if (fopen_s(&f, path.c_str(), "r") != 0 || !f) { ErrorLog("KenshiKin: kenshikin.cfg not found (" + path + "), multiplayer disabled"); return; }
         char line[512];
         while (fgets(line, sizeof(line), f))
         {
@@ -191,6 +191,11 @@ namespace
             else if (k == "load_sharing") g_cfg.loadSharing = toBool(v);
             else if (k == "assault_hostility") g_cfg.assaultHostility = toBool(v);
             else if (k == "town_sync") g_cfg.townSync = toBool(v);
+            else if (k == "block_building_populate") g_cfg.blockPopulate = toBool(v);
+            else if (k == "door_sync") g_cfg.doorSync = toBool(v);
+            else if (k == "theft_sync") g_cfg.theftSync = toBool(v);
+            else if (k == "share_logs") g_cfg.shareLogs = toBool(v);
+            else if (k == "host_console") g_cfg.hostConsole = toBool(v);
             else if (k == "backup_saves") { int n = atoi(v.c_str()); g_cfg.backupSaves = n < 0 ? 0 : (n > 50 ? 50 : n); }
             else if (k == "player_names") g_cfg.playerNames = toBool(v);
             else if (k == "autotest_load") g_cfg.autotestLoad = v;
@@ -206,7 +211,7 @@ namespace
         fclose(f);
     }
 
-    // Rewrites the connection keys in kenshimp.cfg, keeping every other line and comment.
+    // Rewrites the connection keys in kenshikin.cfg, keeping every other line and comment.
     void saveConfig()
     {
         std::string cfg = configPath();
@@ -239,7 +244,7 @@ namespace
             }
             if (!found) lines.push_back(std::string(keys[k]) + "=" + vals[k]);
         }
-        if (fopen_s(&f, path, "w") != 0 || !f) { ErrorLog("KenshiMP: cannot write kenshimp.cfg"); return; }
+        if (fopen_s(&f, path, "w") != 0 || !f) { ErrorLog("KenshiKin: cannot write kenshikin.cfg"); return; }
         for (size_t i = 0; i < lines.size(); ++i) fprintf(f, "%s\n", lines[i].c_str());
         fclose(f);
     }
@@ -398,6 +403,7 @@ namespace
         builds_resendAll();
         ground_resendAll();
         towns_resendAll();
+        doors_resendAll();
         bounties_resendAll();
         if (ou && ou->player) sendFactionTable(true);
     }
@@ -440,6 +446,23 @@ namespace
         case MSG_WORLD_STATE_REPORT:
             towns_onMessage(e);
             break;
+        case MSG_DOOR_STATES:
+        case MSG_DOOR_REPORT:
+            doors_onMessage(e);
+            break;
+        case MSG_LOG:
+            logs_onMessage(e);
+            break;
+        case MSG_RESYNC_REQ:
+        {
+            uint8_t target = r.u8();
+            if (r.ok() && e.sender == HOST_ID && !g_session.isHost() && (target == BROADCAST || target == g_session.localId()))
+            {
+                log("the host asked for a resynchronisation");
+                mp_resyncSelf();
+            }
+            break;
+        }
         case MSG_BOUNTIES:
         case MSG_BOUNTY_CRIME:
             bounties_onMessage(e);
@@ -462,6 +485,7 @@ namespace
             trade_onMessage(e);
             break;
         case MSG_WORLD_CONTAINER:
+        case MSG_THEFT:
             items_onMessage(e);
             break;
         case MSG_REGROUP:
@@ -494,12 +518,79 @@ namespace
     {
         chars_onPlayerLeft(id);
         builds_onPlayerLeft(id);
+        doors_onPlayerLeft(id);
         npcs_onPlayerLeft(id);
         items_onPlayerLeft(id);
         trade_onPlayerLeft(id);
         ground_onPlayerLeft(id);
         bounties_onPlayerLeft(id);
         g_players.erase(id);
+    }
+
+    std::string lower(const std::string& in)
+    {
+        std::string s = in;
+        for (size_t i = 0; i < s.size(); ++i) if (s[i] >= 'A' && s[i] <= 'Z') s[i] = (char)(s[i] - 'A' + 'a');
+        return s;
+    }
+
+    // KenshiKin: resynchronisation. Our copies of everybody go (characters, NPCs, buildings, ground
+    // items), then MSG_RESYNC makes everybody resend its full state, as when a world loads.
+    void resyncLocal()
+    {
+        std::vector<uint8_t> ids;
+        for (std::map<uint8_t, PlayerInfo>::iterator it = g_players.begin(); it != g_players.end(); ++it)
+            if (it->first != g_session.localId()) ids.push_back(it->first);
+        if (!g_session.isHost() && std::find(ids.begin(), ids.end(), HOST_ID) == ids.end()) ids.push_back(HOST_ID);
+        for (size_t i = 0; i < ids.size(); ++i)
+        {
+            chars_onPlayerLeft(ids[i]);
+            builds_onPlayerLeft(ids[i]);
+            ground_onPlayerLeft(ids[i]);
+            items_worldForget(ids[i]);
+        }
+        g_session.send(MSG_RESYNC, Bytes());
+        log("resynchronisation: copies of %u player(s) dropped, full resend asked", (unsigned)ids.size());
+        chat_notice(T("Resynchronising: everybody's characters and buildings are sent again."));
+    }
+
+    int findByName(const std::string& name)
+    {
+        std::string want = lower(name);
+        for (std::map<uint8_t, PlayerInfo>::iterator it = g_players.begin(); it != g_players.end(); ++it)
+            if (lower(it->second.name) == want) return it->first;
+        return -1;
+    }
+
+    // Host console commands (typed in the window, run here on the main loop).
+    void consoleCommands()
+    {
+        std::string line;
+        for (int n = 0; n < 8 && logs_popCommand(line); ++n)
+        {
+            std::string cmd = line, arg;
+            size_t sp = line.find(' ');
+            if (sp != std::string::npos) { cmd = line.substr(0, sp); arg = line.substr(sp + 1); }
+            cmd = lower(cmd);
+            if (cmd == "help")
+                logs_consoleLine("commands: players | resync all | resync <name> | resync me | say <text>");
+            else if (cmd == "players")
+            {
+                for (std::map<uint8_t, PlayerInfo>::iterator it = g_players.begin(); it != g_players.end(); ++it)
+                {
+                    char b[64]; sprintf_s(b, "#%d ", (int)it->first);
+                    logs_consoleLine(b + it->second.name + " (" + it->second.faction + ")" + (it->first == g_session.localId() ? " - you" : ""));
+                }
+            }
+            else if (cmd == "resync") logs_consoleLine(mp_resync(arg));
+            else if (cmd == "say" && !arg.empty())
+            {
+                ByteWriter w; w.str(arg);
+                g_session.send(MSG_CHAT, w.data);
+                chat_received(g_session.localId(), chat_clean(arg));
+            }
+            else logs_consoleLine("unknown command, type: help");
+        }
     }
 
     std::set<uint8_t> g_relationPending;   // players met on the title screen: relation set once the world exists
@@ -522,7 +613,7 @@ namespace
                 break;
             }
             case NetEvent::EV_DISCONNECTED:
-                ErrorLog("KenshiMP: disconnected (" + e.text + ")");
+                ErrorLog("KenshiKin: disconnected (" + e.text + ")");
                 g_ready = false;
                 g_players.clear();
                 g_relationPending.clear();
@@ -564,6 +655,7 @@ namespace
         npcs_reset();
         world_reset();
         towns_onWorldReload();
+        doors_reset();
     }
 
     void handleEvent(const NetEvent& e)
@@ -585,7 +677,7 @@ namespace
         }
         case NetEvent::EV_DISCONNECTED:
         {
-            ErrorLog("KenshiMP: disconnected (" + e.text + ")");
+            ErrorLog("KenshiKin: disconnected (" + e.text + ")");
             forgetEveryone();
             // A refusal (wrong version/mods, server full) will not fix itself: no retry loop.
             g_permanentFailure = e.text.find("must match") != std::string::npos || e.text.find("version") != std::string::npos ||
@@ -597,7 +689,7 @@ namespace
             break;
         }
         case NetEvent::EV_WARNING:
-            ErrorLog("KenshiMP: warning: " + e.text);
+            ErrorLog("KenshiKin: warning: " + e.text);
             showMessage(TF("Multiplayer warning: %s", lang_reason(e.text).c_str()));
             break;
         case NetEvent::EV_PLAYER_JOINED:
@@ -748,6 +840,7 @@ namespace
             loadSlots();
             ok = g_session.host(g_cfg.port, g_cfg.name, g_cfg.faction, err);
             if (ok) steam_onHosting(true, g_cfg.port);   // Steam friends can join too
+            if (ok && g_cfg.hostConsole) logs_openConsole();   // minimised: the game keeps the focus
         }
         else if (g_cfg.mode == "join")
         {
@@ -763,7 +856,7 @@ namespace
         else return;
         if (!ok)
         {
-            ErrorLog("KenshiMP: cannot start session: " + err);
+            ErrorLog("KenshiKin: cannot start session: " + err);
             showMessage(TF("Multiplayer: %s", lang_reason(err).c_str()));
             lobby_setError(lang_reason(err));
             g_nextReconnect = GetTickCount() + RECONNECT_DELAY_MS;
@@ -783,7 +876,7 @@ namespace
     {
         if (!ou || !ou->player) return;
         static bool hinted = false;
-        if (!hinted && worldLoaded()) { hinted = true; if ((g_session.active() || g_cfg.mode == "join") && !g_ready) { showMessage(T("Connecting to the host...")); log("hint: 'Connecting to the host...' shown"); } else if (!g_session.active()) showMessage(TF("KenshiMP: %s = multiplayer window (host / join), Enter = chat.", g_cfg.lobbyKeyName.c_str())); }
+        if (!hinted && worldLoaded()) { hinted = true; if ((g_session.active() || g_cfg.mode == "join") && !g_ready) { showMessage(T("Connecting to the host...")); log("hint: 'Connecting to the host...' shown"); } else if (!g_session.active()) showMessage(TF("KenshiKin: %s = multiplayer window (host / join), Enter = chat.", g_cfg.lobbyKeyName.c_str())); }
 
         // Test runs: targets for the town tests, once the world exists (connected or not).
         // (10 s after the squad appears: the town around it is loaded by then)
@@ -960,6 +1053,8 @@ namespace
         DWORD now = GetTickCount();
         if (now - g_lastTableCheck > 5000) { g_lastTableCheck = now; sendFactionTable(false); }
         chars_tick(now);
+        logs_tick(now);
+        consoleCommands();
         builds_tick(now);
         world_tick(now);
         npcs_tick(now);
@@ -967,6 +1062,7 @@ namespace
         trade_tick(now);
         weather_tick(now);
         towns_tick(now);
+        doors_tick(now);
         bounties_tick(now);
         ground_tick(now);
 
@@ -998,6 +1094,30 @@ namespace
 }
 
 bool ready() { return g_ready && g_session.active(); }
+
+void mp_resyncSelf() { if (ready()) resyncLocal(); }
+
+std::string mp_resync(const std::string& whoIn)
+{
+    if (!ready()) return T("Not connected.");
+    std::string who = lower(whoIn);
+    while (!who.empty() && who[0] == ' ') who.erase(0, 1);
+    if (who.empty() || who == "me" || who == "moi") { resyncLocal(); return T("Resynchronising."); }
+    if (!g_session.isHost()) return T("Only the host can resynchronise other players.");
+    ByteWriter w;
+    if (who == "all" || who == "tous")
+    {
+        w.u8(BROADCAST);
+        g_session.send(MSG_RESYNC_REQ, w.data);
+        resyncLocal();
+        return T("Resynchronising everybody.");
+    }
+    int id = findByName(whoIn);
+    if (id < 0 || id == HOST_ID) return TF("No player named '%s'.", whoIn.c_str());
+    w.u8((uint8_t)id);
+    g_session.sendTo((uint8_t)id, MSG_RESYNC_REQ, w.data);
+    return TF("%s is resynchronising.", playerName((uint8_t)id).c_str());
+}
 bool mp_worldLoaded() { return worldLoaded(); }
 std::string mp_modList() { return modList(); }
 std::string mp_configDir()
@@ -1011,7 +1131,8 @@ void log(const char* fmt, ...)
 {
     char buf[512];
     va_list a; va_start(a, fmt); vsprintf_s(buf, sizeof(buf), fmt, a); va_end(a);
-    DebugLog(std::string("KenshiMP: ") + buf);
+    DebugLog(std::string("KenshiKin: ") + buf);
+    logs_capture(buf);
 }
 
 void showMessage(const std::string& s) { if (ou) ou->showPlayerAMessage(s, false); }
@@ -1089,6 +1210,7 @@ void onWorldReload()
     trade_onWorldReload();
     weather_onWorldReload();
     towns_onWorldReload();
+    doors_reset();
     bounties_onWorldReload();
     ground_onWorldReload();
     chat_onWorldReload();
@@ -1231,15 +1353,16 @@ void mainLoop_hook(GameWorld* thisptr, float time)
 __declspec(dllexport) void startPlugin()
 {
     InitializeCriticalSection(&g_lock);
+    logs_init();
     loadConfig();
-    log("KenshiMP v%u starting (the version is the network protocol number)", (unsigned)PROTOCOL_VERSION);
+    log("KenshiKin v%u starting (the version is the network protocol number)", (unsigned)PROTOCOL_VERSION);
     lang_init();
     bool ok = true;
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&GameWorld::_NV_mainLoop_GPUSensitiveStuff),
                                                  mainLoop_hook, &mainLoop_orig))
-    { ErrorLog("KenshiMP: could not hook the main loop!"); ok = false; }
+    { ErrorLog("KenshiKin: could not hook the main loop!"); ok = false; }
     if (KenshiLib::SUCCESS != KenshiLib::AddHook(KenshiLib::GetRealAddress(&TitleScreen::_NV_update), titleUpdate_hook, &titleUpdate_orig))
-    { ErrorLog("KenshiMP: could not hook the title screen (multiplayer window only in game)"); }
+    { ErrorLog("KenshiKin: could not hook the title screen (multiplayer window only in game)"); }
     if (!chars_install()) ok = false;
     if (g_cfg.syncBuildings && !builds_install()) ok = false;
     world_install();
@@ -1247,5 +1370,5 @@ __declspec(dllexport) void startPlugin()
     if (!items_install()) ok = false;
     weather_install();
     towns_install();
-    if (ok) DebugLog("KenshiMP: plugin loaded (mode=" + g_cfg.mode + ")");
+    if (ok) DebugLog("KenshiKin: plugin loaded (mode=" + g_cfg.mode + ")");
 }

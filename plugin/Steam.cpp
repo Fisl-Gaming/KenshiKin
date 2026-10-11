@@ -267,7 +267,7 @@ void steam_onHosting(bool hosting, int port)
         std::string err;
         if (!g_tunnelHost.running() && !g_tunnelHost.start(&g_transport, port, err)) log("steam: tunnel host failed: %s", err.c_str());
         g_api.richPresence(g_api.friends, "connect", steam_connectString().c_str());
-        g_api.richPresence(g_api.friends, "status", "KenshiMP");
+        g_api.richPresence(g_api.friends, "status", "KenshiKin");
         log("steam: hosting, friends can join through Steam");
     }
     else

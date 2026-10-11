@@ -1,5 +1,5 @@
 // Lobby window (lobby_key, default F4, or the MULTIPLAYER button of the title screen): name, faction, address, port, password,
-// Host / Join / Disconnect, and a live status (players, ping). Choices are saved to kenshimp.cfg,
+// Host / Join / Disconnect, and a live status (players, ping). Choices are saved to kenshikin.cfg,
 // so the next launch reconnects the same way.
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -69,6 +69,7 @@ namespace
     // Diplomacy row buttons: "KMP_Dip_<player>_<w|p|a>"; applied from lobby_tick, never from the event.
     int g_dipPlayer = -1; float g_dipValue = 0;
     bool g_reportRequested = false;                  // BUG REPORT: written from lobby_tick, never from the event
+    int g_resyncRequested = 0;                       // KenshiKin: 1 resync us, 2 everybody (host); run from lobby_tick
     bool g_friendsMode = false;                      // the panel lists Steam friends (invitations)
     std::vector<unsigned long long> g_friendIds;     // row -> friend
     unsigned long long g_inviteId = 0;               // invitation to send (from lobby_tick)
@@ -93,6 +94,8 @@ namespace
         }
         if (n == "KMP_SteamFriends") { g_friendsMode = !g_friendsMode; g_dipShown.clear(); return; }
         if (n == "KMP_Report") { g_reportRequested = true; return; }
+        if (n == "KMP_Resync") { g_resyncRequested = 1; return; }      // KenshiKin
+        if (n == "KMP_ResyncAll") { g_resyncRequested = 2; return; }
         if (n.compare(0, 8, "KMP_Inv_") == 0)
         {
             size_t i = (size_t)atoi(n.c_str() + 8);
@@ -165,17 +168,18 @@ namespace
             // Steam first (friends, invitations); the network settings hide behind "Advanced settings".
             const int advExtra = g_advanced ? 3 * ROW + 46 : 0;
             g_playRow = g_onTitle && g_session.active();
-            const int fixedH = PAD + 2 * ROW + 6 + (g_playRow ? 3 : 2) * 40 + advExtra + 14 + 168 + 68;
+            const bool resyncRow = !g_onTitle && ready();    // KenshiKin: RESYNC buttons while playing in a session
+            const int fixedH = PAD + 2 * ROW + 6 + ((g_playRow ? 3 : 2) + (resyncRow ? 1 : 0)) * 40 + advExtra + 14 + 168 + 68;
             // small screens (720 p): fewer player rows rather than a window taller than the screen
             g_dipRows = DIP_ROWS;
             while (g_dipRows > 2 && fixedH + g_dipRows * DIP_ROW_H > view.height) --g_dipRows;
             const int H = fixedH + g_dipRows * DIP_ROW_H;
             g_win = gui->createWidget<MyGUI::Window>("Kenshi_WindowCX", MyGUI::IntCoord((view.width - W) / 2, (view.height > H ? (view.height - H) / 2 : 0), W, H),
-                                                     MyGUI::Align::Default, "Popup", "KenshiMP_Lobby");
+                                                     MyGUI::Align::Default, "Popup", "KenshiKin_Lobby");
             if (!g_win) return false;
             // The version in the title: players compare it before joining (it must be the same).
             char ver[32]; sprintf_s(ver, " (v%u)", (unsigned)PROTOCOL_VERSION);
-            g_win->setCaption(std::string("KenshiMP - ") + T("Multiplayer") + ver);
+            g_win->setCaption(std::string("KenshiKin - ") + T("Multiplayer") + ver);
             g_win->eventWindowButtonPressed += MyGUI::newDelegate(onWindowButton);
             MyGUI::Widget* c = g_win->getClientWidget() ? g_win->getClientWidget() : g_win;
 
@@ -200,6 +204,12 @@ namespace
             {
                 button(c, PAD, y, 2 * bw + 8, "New game", "KMP_NewGame");
                 button(c, PAD + 2 * (bw + 8), y, 2 * bw + 8, "Continue", "KMP_Continue");
+                y += 40;
+            }
+            if (resyncRow)
+            {
+                button(c, PAD, y, 2 * bw + 8, "Resync", "KMP_Resync");
+                if (g_session.isHost()) button(c, PAD + 2 * (bw + 8), y, 2 * bw + 8, "Resync everyone", "KMP_ResyncAll");
                 y += 40;
             }
             button(c, PAD, y, 2 * bw + 8, g_advanced ? "Hide advanced settings" : "Advanced settings", "KMP_Advanced");
@@ -289,7 +299,7 @@ namespace
         char buf[160];
         if (!g_session.active())
         {
-            if (g_cfg.mode == "host") s = T("Not hosting yet: press Host (or load a game, kenshimp.cfg says mode=host).");
+            if (g_cfg.mode == "host") s = T("Not hosting yet: press Host (or load a game, kenshikin.cfg says mode=host).");
             else if (g_cfg.mode == "join") s = T("Not connected. Press Join by address in Advanced settings (retries every 10 s once in game).");
             else s = T("Not connected. Host a game, or accept a friend's Steam invitation.");
         }
@@ -458,7 +468,7 @@ void lobby_titleButton(bool show)
         const MyGUI::IntSize& view = MyGUI::RenderManager::getInstance().getViewSize();
         g_titleButton = gui->createWidget<MyGUI::Button>("Kenshi_Button1",
             MyGUI::IntCoord((int)(view.width * 0.261f), (int)(view.height * 0.895f), (int)(view.width * 0.155f), (int)(view.height * 0.052f)),
-            MyGUI::Align::Default, "Main", "KenshiMP_TitleButton");
+            MyGUI::Align::Default, "Main", "KenshiKin_TitleButton");
         if (!g_titleButton) return;
         g_titleButton->setCaption(std::string(T("MULTIPLAYER")) + " (" + g_cfg.lobbyKeyName + ")");
         g_titleButton->eventMouseButtonClick += MyGUI::newDelegate(onTitleButton);
@@ -530,13 +540,13 @@ void lobby_factionsTick()
             if (g_facBar) MyGUI::Gui::getInstance().destroyWidget(g_facBar);
             MyGUI::Widget* parent = fs->mainWidget;
             int w = parent->getWidth(), h = parent->getHeight(), bw = 92, gap = 6, bh = 30;
-            g_facBar = parent->createWidget<MyGUI::Widget>("", MyGUI::IntCoord(16, h - bh - 16, w - 32, bh), MyGUI::Align::Left | MyGUI::Align::Bottom, "KenshiMP_FactionBar");
+            g_facBar = parent->createWidget<MyGUI::Widget>("", MyGUI::IntCoord(16, h - bh - 16, w - 32, bh), MyGUI::Align::Left | MyGUI::Align::Bottom, "KenshiKin_FactionBar");
             g_facParent = parent;
             g_facShown = sig;
             const char* state = rel < 0 ? T("at war") : rel > 50 ? T("allied") : T("neutral");
             MyGUI::TextBox* label = g_facBar->createWidget<MyGUI::TextBox>("Kenshi_TextboxStandardText",
                 MyGUI::IntCoord(0, 0, g_facBar->getWidth() - 4 * (bw + gap), bh), MyGUI::Align::Default);
-            label->setCaption(MyGUI::UString(std::string("KenshiMP : ") + state));
+            label->setCaption(MyGUI::UString(std::string("KenshiKin : ") + state));
             const char* caps[4] = { "War", "Peace", "Ally", trade_pendingFrom((uint8_t)player) ? "Accept" : "Trade" };
             const char kinds[4] = { 'w', 'p', 'a', 't' };
             for (int k = 0; k < 4; ++k)
@@ -632,11 +642,11 @@ void lobby_pauseButton()
         MyGUI::Widget* parent = panel->getParent();
         if (!parent) return;
         for (size_t i = 0; i < parent->getChildCount(); ++i)
-            if (parent->getChildAt(i)->getName() == "KenshiMP_PauseButton") return;   // already there
+            if (parent->getChildAt(i)->getName() == "KenshiKin_PauseButton") return;   // already there
         const MyGUI::IntCoord& pc = panel->getCoord();
         int w = (int)(pc.width * 0.75f), h = (int)(pc.height * 0.13f);
         MyGUI::Button* b = parent->createWidget<MyGUI::Button>("Kenshi_Button1",
-            MyGUI::IntCoord(pc.left + (pc.width - w) / 2, pc.top + pc.height + 8, w, h), MyGUI::Align::Default, "KenshiMP_PauseButton");
+            MyGUI::IntCoord(pc.left + (pc.width - w) / 2, pc.top + pc.height + 8, w, h), MyGUI::Align::Default, "KenshiKin_PauseButton");
         b->setCaption(T("MULTIPLAYER"));
         b->eventMouseButtonClick += MyGUI::newDelegate(onPauseButton);
     }
@@ -723,6 +733,14 @@ void lobby_tick()
         unsigned long long who = g_inviteId; g_inviteId = 0;
         if (!g_session.active() || !g_session.isHost()) mp_start("host");   // you invite: you host
         showMessage(steam_invite(who) ? T("Steam invitation sent.") : T("Steam invitation failed."));
+    }
+    if (g_resyncRequested)
+    {
+        int what = g_resyncRequested;
+        g_resyncRequested = 0;
+        showMessage(mp_resync(what == 2 ? "all" : ""));
+        destroy();
+        return;
     }
     if (g_reportRequested)
     {

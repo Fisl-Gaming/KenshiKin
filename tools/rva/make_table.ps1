@@ -1,6 +1,6 @@
 # Builds KenshiLib's address table for another Kenshi build (offline, the game is never run).
 #
-# KenshiLib (the library KenshiMP is built on) only knows the 1.0.65 executables that RE_Kenshi
+# KenshiLib (the library KenshiKin is built on) only knows the 1.0.65 executables that RE_Kenshi
 # installs. This maps every entry of RE_Kenshi's 1.0.65 table onto another executable:
 #  1. every function of both executables (from their .pdata exception tables) gets a signature:
 #     its instructions with call/jump targets, RIP-relative displacements and 32-bit immediates
@@ -10,7 +10,7 @@
 #     by majority vote;
 #  3. remaining code entries: same offset from the nearest paired function, accepted only if the
 #     24 masked bytes there are identical.
-# Entries that cannot be found are written as 0 and listed (none of them is used by KenshiMP for
+# Entries that cannot be found are written as 0 and listed (none of them is used by KenshiKin for
 # Steam 1.0.68; check with the list printed at the end before using a table for another build).
 #
 # Needs Iced (MIT, x86 disassembler): download https://www.nuget.org/api/v2/package/Iced/1.21.0,

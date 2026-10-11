@@ -16,7 +16,8 @@
 
 namespace mp {
 
-const uint32_t PROTOCOL_VERSION = 18;
+// KenshiKin (fork of KenshiMP): 1000 + upstream protocol, so the two never join each other.
+const uint32_t PROTOCOL_VERSION = 1022;
 
 // World NPCs replicated by the host use the upper half of the host's local id space.
 const uint32_t NPC_ID_FLAG = 0x800000;
@@ -73,7 +74,20 @@ enum MsgType
     MSG_WORLD_CONTAINER,  // c->h u8 HOST_ID, u8 open (1 opened, 0 closed), u32 containerNetId, str buildingSid, f32 x, y, z :
                           //      the client opened a town container (chest, shop storage...): the host sends its content
                           //      (MSG_INVENTORY, kind CONTAINER_WORLD) while it stays open, transfers go to the host
-    MSG_REGROUP           // u8 targetPlayer : the sender's squad was moved next to that player's characters (F4 / "/goto")
+    MSG_REGROUP,          // u8 targetPlayer : the sender's squad was moved next to that player's characters (F4 / "/goto")
+    // --- KenshiKin ---
+    MSG_DOOR_STATES,      // h->c u16 n, {str buildingSid, f32 x, y, z, u8 doors, u8 bits*}* : town doors / gates (1 locked, 2 open, 4 broken)
+    MSG_DOOR_REPORT,      // c->h u8 HOST_ID, one such entry (the bits as on the client), u8 door : the client lockpicked that door
+    MSG_THEFT,            // c->h u8 HOST_ID, u8 kind (CONTAINER_*), u32 containerId, u32 thiefNetId, str itemSid, u8 noticedHere :
+                          //      the client's engine ran its theft check (Character::ImStealingDoYouNotice) on that take
+    MSG_CARRY,            // u8 targetPlayer, u32 carriedNetId, u32 carrierNetId, u8 action (1 picked up, 0 dropped) : someone
+                          //      here lifted / put down the target's character (its owner makes the carrier's copy do the same)
+    MSG_FIRST_AID,        // u8 targetPlayer, u32 patientNetId, u32 medicNetId, u8 doctoring, f32 skill, f32 seconds, str kitSid :
+                          //      someone here treated the target's character (or NPC): its owner applies the treatment
+    MSG_CRIME,            // c->h u8 HOST_ID, u32 charNetId, u8 crime (CrimeEnum, 0 = none), str victimFactionSid, TargetRef victim, f32 expiry :
+                          //      the crime that character is committing right now (owner -> the host's copy, whose NPCs witness it)
+    MSG_LOG,              // c->h u8 HOST_ID, u16 n, str line* : the client's log lines, written into the host's log / console
+    MSG_RESYNC_REQ        // h->c u8 targetPlayer (BROADCAST = everybody) : drop your copies of everybody and ask for a full resend
 };
 
 inline bool isRelayed(uint8_t t) { return t >= MSG_ENTITY_STATE; }
@@ -128,7 +142,9 @@ struct TargetRef
 
 struct EntityState
 {
-    enum Flags { DEAD = 1, UNCONSCIOUS = 2, RUNNING = 4, IN_COMBAT = 8, RAGDOLL = 16 };
+    enum Flags { DEAD = 1, UNCONSCIOUS = 2, RUNNING = 4, IN_COMBAT = 8, RAGDOLL = 16,
+                 STEALTH = 32,      // sneaking (Character::isStealthMode), KenshiKin
+                 CARRIED = 64 };    // being carried by someone (KenshiKin)
 
     uint32_t netId;
     float x, y, z;          // world position
@@ -145,9 +161,17 @@ struct EntityState
     float tx, ty, tz;               // task location
     float vx, vy, vz;               // velocity (units/s), for extrapolation
     int8_t floor;                   // building floor (0 = ground / outside)
+    // KenshiKin (protocol 1021): the body as the owner's engine has it.
+    enum Body { PRONE_MASK = 7,      // bits 0-2: Character::_currentProneState (ProneState)
+                OCC_SHIFT = 3, OCC_MASK = 3 << 3,   // bits 3-4: Character::inSomething (0 none, 1 bed, 2 prison)
+                CHAINED = 1 << 5 };  // Character::isChained (prisoner pole / slave shackles)
+    uint8_t body;
+    TargetRef furniture;            // the bed / cage it is in (body occupancy != 0)
 
     EntityState() : netId(0), x(0), y(0), z(0), qx(0), qy(0), qz(0), qw(1), health(1), anim(0), flags(0),
-                    moveSpeed(0), blood(0), task(0xFFFF), tx(0), ty(0), tz(0), vx(0), vy(0), vz(0), floor(0) {}
+                    moveSpeed(0), blood(0), task(0xFFFF), tx(0), ty(0), tz(0), vx(0), vy(0), vz(0), floor(0), body(0) {}
+    int prone() const { return body & PRONE_MASK; }
+    int occupancy() const { return (body & OCC_MASK) >> OCC_SHIFT; }
     void write(ByteWriter& w) const
     {
         w.u32(netId); w.f32(x); w.f32(y); w.f32(z);
@@ -159,6 +183,7 @@ struct EntityState
         w.u16(task); taskSubject.write(w); w.f32(tx); w.f32(ty); w.f32(tz);
         w.f32(vx); w.f32(vy); w.f32(vz);
         w.u8((uint8_t)floor);
+        w.u8(body); furniture.write(w);
     }
     void read(ByteReader& r)
     {
@@ -171,6 +196,7 @@ struct EntityState
         task = r.u16(); taskSubject.read(r); tx = r.f32(); ty = r.f32(); tz = r.f32();
         vx = r.f32(); vy = r.f32(); vz = r.f32();
         floor = (int8_t)r.u8();
+        body = r.u8(); furniture.read(r);
     }
     // False if unusable (bad position); otherwise repairs the rest in place.
     bool sanitize()
@@ -186,6 +212,9 @@ struct EntityState
         if (moveSpeed > 4) moveSpeed = 4;
         vx = clampF(vx, -100.f, 100.f); vy = clampF(vy, -100.f, 100.f); vz = clampF(vz, -100.f, 100.f);
         if (floor < 0 || floor > 20) floor = 0;
+        if (prone() > 4) body &= ~PRONE_MASK;
+        if (occupancy() > 2) body &= ~OCC_MASK;
+        if (furniture.kind > TargetRef::WORLD_BUILDING || !validPos(furniture.x, furniture.y, furniture.z)) furniture = TargetRef();
         return true;
     }
 };

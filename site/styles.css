@@ -355,16 +355,20 @@ h2 {
   fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
 
-/* Feature groups: list and screenshot side by side, alternating */
+/* Feature groups: a title strip and the list; with a screenshot (.shot) they go side by side */
 .groups { display: grid; gap: 1.6rem; }
-.group {
+.group:has(> .shot) {
   display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   grid-template-areas: "t t" "l s";
 }
-.group:nth-child(even) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); grid-template-areas: "t t" "s l"; }
+.group:has(> .shot):nth-child(even) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); grid-template-areas: "t t" "s l"; }
 .group > .panel__title { grid-area: t; }
 .group > .list { grid-area: l; }
 .group > .shot { grid-area: s; }
+.group:not(:has(> .shot)) > .list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  gap: .9rem 2.4rem; padding: 1.3rem 1.5rem 1.5rem;
+}
 
 .list { list-style: none; margin: 0; padding: 1.2rem 1.3rem 1.4rem; display: grid; gap: .85rem; align-content: start; }
 .list li { position: relative; padding-left: 1.25rem; }
@@ -381,7 +385,7 @@ h2 {
 }
 .tag--plain { color: var(--muted); border-color: var(--frame-soft); }
 
-/* Screenshot slots. Replace .shot__ph with an <img> when screenshots exist. */
+/* Screenshot slots (.shot__ph is a placeholder box, .shot img a real screenshot) */
 .shot { margin: 0; padding: 1.2rem; display: flex; align-items: flex-start; }
 .shot img { display: block; width: 100%; height: auto; border: 1px solid var(--frame); }
 .shot__ph {
@@ -544,7 +548,7 @@ html.js .paper.is-in .brush { transform: scaleX(1); }
 
 /* ---------- Small screens ---------- */
 @media (max-width: 820px) {
-  .group, .group:nth-child(even) {
+  .group:has(> .shot), .group:has(> .shot):nth-child(even) {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "t" "l" "s";
   }

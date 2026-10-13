@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="ru" data-lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#17130f">
+<title>KenshiKin — кооператив и PvP для Kenshi</title>
+<meta name="description" content="KenshiKin — форк KenshiMP: кооператив и PvP для Kenshi. У каждого игрока свой отряд, мир хоста общий. Бета.">
+<script>
+/* Language before first paint: saved choice, else the browser's language. */
+(function () {
+  var d = document.documentElement, l = null;
+  try { l = localStorage.getItem('kk-lang'); } catch (e) {}
+  if (l !== 'ru' && l !== 'en') {
+    var n = ((navigator.languages && navigator.languages[0]) || navigator.language || 'en').toLowerCase();
+    l = n.indexOf('ru') === 0 ? 'ru' : 'en';
+  }
+  d.lang = l;
+  d.setAttribute('data-lang', l);
+  d.className += ' js';
+})();
+</script>
+<meta property="og:type" content="website">
+<meta property="og:title" content="KenshiKin — кооператив и PvP для Kenshi">
+<meta property="og:description" content="Форк KenshiMP: у каждого игрока свой отряд, мир хоста общий. Бета.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Sans+Extra+Condensed:wght@500;600;800&family=PT+Mono&family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Sans+Extra+Condensed:wght@500;600;800&family=PT+Mono&family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap"></noscript>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main"><span lang="ru">К содержанию</span><span lang="en">Skip to content</span></a>
+
+<!-- ============ Top bar: a game-UI strip with the scroll gauge ============ -->
+<header class="bar" id="top-bar">
+  <div class="bar__in">
+    <a class="bar__brand" href="#top">KenshiKin</a>
+    <nav class="bar__nav" id="nav" aria-label="Sections">
+      <a href="#features"><span lang="ru">Что умеет</span><span lang="en">Features</span></a>
+      <a href="#made"><span lang="ru">Как сделан</span><span lang="en">How it's made</span></a>
+      <a href="#install"><span lang="ru">Установка</span><span lang="en">Install</span></a>
+      <a href="#issues"><span lang="ru">Проблемы</span><span lang="en">Known issues</span></a>
+      <a href="#versions"><span lang="ru">Версии</span><span lang="en">Versions</span></a>
+    </nav>
+    <div class="bar__tools">
+      <div class="lang" role="group" aria-label="Language / Язык">
+        <button type="button" data-set-lang="ru" aria-pressed="true">RU</button>
+        <button type="button" data-set-lang="en" aria-pressed="false">EN</button>
+      </div>
+      <button type="button" class="bar__menu" aria-expanded="false" aria-controls="nav">
+        <span lang="ru">Меню</span><span lang="en">Menu</span>
+      </button>
+    </div>
+  </div>
+  <div class="gauge" aria-hidden="true">
+    <div class="gauge__fill"></div>
+    <div class="gauge__ticks"></div>
+  </div>
+</header>
+
+<!-- ============ First screen: the desert ============ -->
+<div class="world" id="top">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="land" aria-hidden="true">
+      <div class="land__sky"></div>
+      <div class="land__sun"></div>
+      <img class="land__layer" data-depth=".62" src="assets/layer-far.svg" alt="" width="1600" height="900" decoding="async" fetchpriority="high">
+      <img class="land__layer" data-depth=".42" src="assets/layer-mid.svg" alt="" width="1600" height="900" decoding="async">
+      <img class="land__layer" data-depth=".22" src="assets/layer-dunes.svg" alt="" width="1600" height="900" decoding="async">
+      <img class="land__layer" data-depth="0" src="assets/layer-near.svg" alt="" width="1600" height="900" decoding="async">
+      <div class="land__wash"></div>
+    </div>
+    <p class="sr-only">
+      <span lang="ru">Рисунок: выжженная пустыня, разрушенные башни, рёбра гигантского скелета и трое путников на гребне дюны.</span>
+      <span lang="en">Illustration: a scorched desert, ruined towers, the ribs of a giant skeleton and three travellers on a dune crest.</span>
+    </p>
+
+    <div class="hero__copy" data-hero-copy>
+      <p class="stamp">
+        <span class="stamp__word"><span lang="ru">Бета</span><span lang="en">Beta</span></span>
+        <span class="stamp__note"><span lang="ru">играем втроём · баги будут</span><span lang="en">played by three friends · expect bugs</span></span>
+      </p>
+      <h1 class="hero__title" id="hero-title">KenshiKin</h1>
+      <p class="hero__lead">
+        <span lang="ru">Кооператив и PvP для Kenshi. У каждого игрока свой отряд, а мир хоста — общий.</span>
+        <span lang="en">Co-op and PvP for Kenshi. Every player keeps their own squad; the host's world is shared.</span>
+      </p>
+      <div class="hero__actions">
+        <a class="btn btn--main" href="https://github.com/Fisl-Gaming/KenshiKin/releases/latest">
+          <span lang="ru">Скачать</span><span lang="en">Download</span>
+          <small><span lang="ru">стабильная версия</span><span lang="en">stable release</span></small>
+        </a>
+        <a class="btn btn--ghost" href="https://github.com/Fisl-Gaming/KenshiKin">GitHub</a>
+      </div>
+      <p class="hero__facts">
+        <span lang="ru">Форк KenshiMP · Steam 1.0.68 · до 8 игроков · вход по приглашению Steam</span>
+        <span lang="en">A fork of KenshiMP · Steam 1.0.68 · up to 8 players · join by Steam invite</span>
+      </p>
+    </div>
+  </section>
+
+  <div class="world__fade" aria-hidden="true"></div>
+  <canvas class="dust" aria-hidden="true"></canvas>
+</div>
+
+<!-- The one loud moment: a sand storm sweeps over the screen as you leave the desert -->
+<div class="storm" aria-hidden="true">
+  <div class="storm__haze"></div>
+  <div class="storm__sheet storm__sheet--a"></div>
+  <div class="storm__sheet storm__sheet--b"></div>
+  <div class="storm__sheet storm__sheet--c"></div>
+</div>
+
+<div class="dusk" aria-hidden="true"><img src="assets/layer-far.svg" alt="" width="1600" height="900" loading="lazy" decoding="async"></div>
+
+<main id="main">
+
+  <!-- ============ 01 Features ============ -->
+  <section class="sect" id="features" aria-labelledby="h-features">
+    <header class="sect__head reveal">
+      <p class="sect__num">01</p>
+      <h2 id="h-features"><span lang="ru">Что умеет</span><span lang="en">What it does</span></h2>
+      <p class="sect__intro">
+        <span lang="ru">Форк <a href="https://github.com/xemou/KenshiMP">KenshiMP</a>, у которого одна главная цель: чтобы миры игроков совпадали. Вот что уже совпадает.</span>
+        <span lang="en">A fork of <a href="https://github.com/xemou/KenshiMP">KenshiMP</a> with one main goal: the players' worlds should match. Here is what already does.</span>
+      </p>
+    </header>
+
+    <div class="groups">
+
+      <article class="panel group reveal">
+        <h3 class="panel__title">
+          <svg class="glyph" viewBox="0 0 40 40" aria-hidden="true"><circle cx="27" cy="13" r="6"/><path d="M3 30c8-6 14-7 20-4s10 3 14 0M3 36h34"/></svg>
+          <span lang="ru">Мир</span><span lang="en">The world</span>
+        </h3>
+        <ul class="list">
+          <li lang="ru"><b>У каждого свой отряд, фракция, база и города.</b> Персонажи других игроков — живые копии: движение, бой, снаряжение, раны, потерянные конечности, протезы, имена над головой.</li>
+          <li lang="en"><b>Everyone keeps their own squad, faction, base and towns.</b> Other players' characters are live copies: movement, combat, equipment, injuries, lost limbs, prosthetics, names above their heads.</li>
+          <li lang="ru"><b>Мир хоста общий:</b> NPC и животные вокруг каждого игрока, время суток, погода, пауза, состояния городов (разрушенные и захваченные, убитые уникальные NPC), сломанные двери.</li>
+          <li lang="en"><b>The host's world is shared:</b> NPCs and animals around each player, time of day, weather, pause, town states (destroyed or taken towns, dead uniques), broken doors.</li>
+          <li lang="ru"><b>Мебель и свет.</b> Города, которые клиент загрузил во время сессии, больше не пустые и не тёмные.</li>
+          <li lang="en"><b>Furniture and lights.</b> Towns a client loads while connected are no longer empty and dark.</li>
+          <li lang="ru"><b>Жизнь города.</b> NPC сидят в барах на своих стульях и спят в кроватях — как у хоста.</li>
+          <li lang="en"><b>Town life.</b> NPCs sit on their bar stools and rest in their beds, as on the host.</li>
+          <li lang="ru"><b>Двери и ворота</b> открыты, закрыты или заперты так же, как в мире хоста.</li>
+          <li lang="en"><b>Doors and gates</b> are open, closed or locked as in the host's world.</li>
+        </ul>
+        <figure class="shot">
+          <!-- SCREENSHOT: replace the div below with
+               <img src="assets/shots/bar.jpg" alt="…" width="1600" height="900" loading="lazy"> -->
+          <div class="shot__ph">
+            <span lang="ru">Сюда скриншот: двое игроков в баре, NPC сидят у стойки</span>
+            <span lang="en">Screenshot here: two players in a bar, NPCs sitting at the counter</span>
+          </div>
+        </figure>
+      </article>
+
+      <article class="panel group reveal">
+        <h3 class="panel__title">
+          <svg class="glyph" viewBox="0 0 40 40" aria-hidden="true"><path d="M6 34L30 8l4 0 0 4L8 36M34 34L10 8 6 8l0 4 26 24M11 27l2 2M29 27l-2 2"/></svg>
+          <span lang="ru">Бой и тела</span><span lang="en">Combat and bodies</span>
+        </h3>
+        <ul class="list">
+          <li lang="ru"><b>Нокаут и смерть решает только владелец персонажа.</b> Копия сама не падает, не лежит дольше и не встаёт раньше.</li>
+          <li lang="en"><b>Only the owner decides knock-outs and deaths.</b> A copy never falls, stays down or gets up on its own.</li>
+          <li lang="ru"><b>Переноска тел.</b> Кто бы ни поднял лежачего игрока — друг или NPC хоста, — настоящее тело несут и в мире владельца.</li>
+          <li lang="en"><b>Carrying bodies.</b> Whoever lifts a downed player — a friend or the host's NPCs — carries the real body in the owner's world too.</li>
+          <li lang="ru"><b>Лечение.</b> Перевязка и лечение чужого персонажа доходят до настоящего.</li>
+          <li lang="en"><b>Healing.</b> First aid and doctoring on another player's character reach the real one.</li>
+          <li lang="ru"><b>Поза, кровати, клетки.</b> Ползёт раненый, притворяется мёртвым, лежит в кровати, сидит в клетке, стоит у столба — у всех одинаково.</li>
+          <li lang="en"><b>Posture, beds, cages.</b> Crawling, playing dead, in a bed, in a cage, on a prisoner pole — the same for everyone.</li>
+        </ul>
+        <figure class="shot">
+          <!-- SCREENSHOT: replace the div below with an <img> -->
+          <div class="shot__ph">
+            <span lang="ru">Сюда скриншот: друг несёт лежачего персонажа</span>
+            <span lang="en">Screenshot here: a friend carrying a downed character</span>
+          </div>
+        </figure>
+      </article>
+
+      <article class="panel group reveal">
+        <h3 class="panel__title">
+          <svg class="glyph" viewBox="0 0 40 40" aria-hidden="true"><circle cx="15" cy="15" r="7"/><path d="M12 21l-3 13h12l-3-13M24 24L37 11M33 15l3 3"/></svg>
+          <span lang="ru">Кражи</span><span lang="en">Thefts</span>
+        </h3>
+        <ul class="list">
+          <li lang="ru"><b>Присед виден.</b> Другие игроки видят, что вы крадётесь.</li>
+          <li lang="en"><b>Sneaking shows.</b> Other players see you crouch.</li>
+          <li lang="ru"><b>NPC хоста всё видят.</b> Кражу из городского ящика, взлом, проникновение и нападение в мире хоста замечают его NPC и реагируют.</li>
+          <li lang="en"><b>The host's NPCs are watching.</b> Stealing from a town container, lockpicking, trespassing or assault in the host's world is seen by the host's NPCs, who react.</li>
+          <li lang="ru"><b>Взлом общий.</b> Дверь, которую взломал клиент, открывается и у хоста.</li>
+          <li lang="en"><b>Lockpicking is shared.</b> A door a client lockpicks is unlocked for the host too.</li>
+          <li lang="ru"><b>Между игроками преступлений нет.</b> Для движка драка с другим игроком или его ограбление — не преступление, стража не вмешивается. Разборки — дело самих игроков.</li>
+          <li lang="en"><b>No crimes between players.</b> To the engine, fighting or robbing another player is not a crime, and no guards step in. That is for the players to settle.</li>
+        </ul>
+        <figure class="shot">
+          <!-- SCREENSHOT: replace the div below with an <img> -->
+          <div class="shot__ph">
+            <span lang="ru">Сюда скриншот: стража бежит за вором от городского ящика</span>
+            <span lang="en">Screenshot here: guards running after a thief from a town container</span>
+          </div>
+        </figure>
+      </article>
+
+      <article class="panel group reveal">
+        <h3 class="panel__title">
+          <svg class="glyph" viewBox="0 0 40 40" aria-hidden="true"><path d="M15 9h10l-2 5c7 3 11 9 11 15 0 5-4 7-14 7S6 34 6 29c0-6 4-12 11-15zM16 14h8M13 6l3 3M27 6l-3 3"/></svg>
+          <span lang="ru">Отношения, торговля, лут</span><span lang="en">Relations, trade, loot</span>
+        </h3>
+        <ul class="list">
+          <li lang="ru"><b>Война, мир и союз</b> — с каждым игроком отдельно.</li>
+          <li lang="en"><b>War, peace and alliance</b> — set per player.</li>
+          <li lang="ru"><b>Торговля напрямую</b>, в родном окне торговли игры.</li>
+          <li lang="en"><b>Direct trading</b> in the game's own trade window.</li>
+          <li lang="ru"><b>Городские сундуки</b> — как в мире хоста.</li>
+          <li lang="en"><b>Town chests</b> are the host's.</li>
+          <li lang="ru"><b>Лут на земле общий.</b> Всё, что лежит на земле в мире хоста — выпавшее у NPC, предметы в руинах, — у всех одинаковое. <span class="tag">v1023 · тест</span></li>
+          <li lang="en"><b>Loot on the ground is shared.</b> What lies on the ground in the host's world — NPC drops, items in ruins — is the same for everybody. <span class="tag">v1023 · test</span></li>
+          <li lang="ru"><b>Рюкзаки на земле.</b> Что один игрок взял или положил, видят все. <span class="tag">v1023 · тест</span></li>
+          <li lang="en"><b>Bags on the ground.</b> What one player takes out or puts in, everybody sees. <span class="tag">v1023 · test</span></li>
+          <li lang="ru"><b>Ящики в незагруженных зонах.</b> Если хост ещё не загрузил зону городского ящика, он её подгружает, и содержимое приходит (раньше ящик был пустым). <span class="tag">v1023 · тест</span></li>
+          <li lang="en"><b>Containers in unloaded zones.</b> If the host has not loaded a town container's zone, the host loads it and sends the content (it used to be empty). <span class="tag">v1023 · test</span></li>
+        </ul>
+        <figure class="shot">
+          <!-- SCREENSHOT: replace the div below with an <img> -->
+          <div class="shot__ph">
+            <span lang="ru">Сюда скриншот: окно торговли между двумя игроками</span>
+            <span lang="en">Screenshot here: the trade window between two players</span>
+          </div>
+        </figure>
+      </article>
+
+      <article class="panel group reveal">
+        <h3 class="panel__title">
+          <svg class="glyph" viewBox="0 0 40 40" aria-hidden="true"><path d="M4 33l5-9 5 9zM26 33l5-9 5 9z"/><path d="M9 20C13 8 27 8 31 20" stroke-dasharray="2 4"/></svg>
+          <span lang="ru">Связь</span><span lang="en">Connection</span>
+        </h3>
+        <ul class="list">
+          <li lang="ru"><b>Вход по приглашению Steam</b> прямо с титульного экрана, без IP и проброса портов. По IP и через VPN тоже можно.</li>
+          <li lang="en"><b>Join through a Steam invitation</b> from the title screen, no IP or port forwarding. Direct IP or a VPN also works.</li>
+          <li lang="ru"><b>До 8 игроков.</b> Хост проверяет, что у всех один релиз и одинаковые моды, и пишет, что отличается.</li>
+          <li lang="en"><b>Up to 8 players.</b> The host checks that everyone has the same release and the same mods, and says what differs.</li>
+          <li lang="ru"><b>Логи друзей у хоста.</b> Строки лога клиентов приходят в лог хоста.</li>
+          <li lang="en"><b>Friends' logs on the host.</b> Clients' log lines arrive in the host's log.</li>
+          <li lang="ru"><b>Окно хоста</b> вне игры: игроки, живой лог всех и команды.</li>
+          <li lang="en"><b>Host console</b> outside the game: the players, everyone's live log and commands.</li>
+          <li lang="ru"><b>Кнопка RESYNC</b> и <code>/resync</code>, если что-то разъехалось.</li>
+          <li lang="en"><b>RESYNC button</b> and <code>/resync</code> when something drifts apart.</li>
+          <li lang="ru"><b>Легче для игры:</b> меньше работы каждый кадр для копий и NPC.</li>
+          <li lang="en"><b>Lighter on the game:</b> less per-frame work for copies and replicated NPCs.</li>
+        </ul>
+        <figure class="shot">
+          <!-- SCREENSHOT: replace the div below with an <img> -->
+          <div class="shot__ph">
+            <span lang="ru">Сюда скриншот: окно хоста с живым логом игроков</span>
+            <span lang="en">Screenshot here: the host console with the players' live log</span>
+          </div>
+        </figure>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ 02 How it is made ============ -->
+  <section class="sect sect--paper" id="made" aria-labelledby="h-made">
+    <div class="paper reveal">
+      <header class="paper__head">
+        <p class="sect__num">02</p>
+        <h2 id="h-made"><span lang="ru">Как сделан этот мод</span><span lang="en">How this mod is made</span></h2>
+        <svg class="brush" viewBox="0 0 600 24" preserveAspectRatio="none" aria-hidden="true"><path d="M2 14C80 8 160 18 260 11s210-6 336 3c-90 2-190 6-300 5S70 22 2 14z"/></svg>
+      </header>
+
+      <p class="paper__claim">
+        <span lang="ru">Все изменения, которые KenshiKin вносит поверх KenshiMP, написал ИИ — Claude (Anthropic) через Claude Code. Ни одной строчки кода этого форка человек не писал и не правил.</span>
+        <span lang="en">Every change KenshiKin makes on top of KenshiMP was written by an AI — Claude (Anthropic), working through Claude Code. No person wrote or edited a single line of this fork's code.</span>
+      </p>
+
+      <div class="roles">
+        <div class="role">
+          <h3><span lang="ru">Что делали люди</span><span lang="en">What people did</span></h3>
+          <ul lang="ru">
+            <li>решали, что чинить;</li>
+            <li>играли тестовые сессии;</li>
+            <li>присылали логи, когда что-то ломалось.</li>
+          </ul>
+          <ul lang="en">
+            <li>chose what to fix;</li>
+            <li>played the test sessions;</li>
+            <li>sent the logs when something broke.</li>
+          </ul>
+        </div>
+        <div class="role">
+          <h3><span lang="ru">Что делал ИИ</span><span lang="en">What the AI did</span></h3>
+          <ul lang="ru">
+            <li>читал логи;</li>
+            <li>читал заголовки движка (KenshiLib) и другие открытые кооп-моды;</li>
+            <li>писал исправления.</li>
+          </ul>
+          <ul lang="en">
+            <li>read the logs;</li>
+            <li>read the engine headers (KenshiLib) and other open co-op mods;</li>
+            <li>wrote the fixes.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="paper__sub"><span lang="ru">Что это значит для вас</span><span lang="en">What that means for you</span></h3>
+      <ol class="paper__list">
+        <li lang="ru">Исправления опираются на то, что удалось узнать о движке Kenshi из заголовков, логов и чужих проектов, а не на исходники Lo-Fi Games. Часть из них — обоснованные догадки, которые подтвердились в игре; часть в игре ещё не проверена — она отмечена в <a href="#issues">известных проблемах</a>.</li>
+        <li lang="en">The fixes rest on what could be learned about Kenshi's engine from headers, logs and other projects, not on Lo-Fi Games' source code. Some are educated guesses that turned out right in play; some are not tested in play yet — those are marked in the <a href="#issues">known issues</a>.</li>
+        <li lang="ru">Все рискованные вызовы движка защищены (SEH): если что-то не работает на вашей версии игры, эта функция сама отключается и пишет строку в лог, а игра не падает.</li>
+        <li lang="en">Every risky engine call is guarded (SEH): when something does not work on your game build, that feature switches itself off and writes a line in the log instead of crashing the game.</li>
+        <li lang="ru">Подходы из других кооп-модов написаны заново, чужой код не копировался. Основа, KenshiMP, — работа её авторов.</li>
+        <li lang="en">Approaches from other co-op mods were re-implemented; no code was copied. The base mod, KenshiMP, is the work of its own authors.</li>
+        <li lang="ru">Код открыт под GPL-3.0: каждую строку можно прочитать в <a href="https://github.com/Fisl-Gaming/KenshiKin">репозитории</a>.</li>
+        <li lang="en">The code is open under GPL-3.0: every line can be read in the <a href="https://github.com/Fisl-Gaming/KenshiKin">repository</a>.</li>
+      </ol>
+      <p class="paper__foot">
+        <span lang="ru">Этот сайт тоже написал Claude.</span>
+        <span lang="en">This site was written by Claude too.</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 03 Install and play ============ -->
+  <section class="sect" id="install" aria-labelledby="h-install">
+    <header class="sect__head reveal">
+      <p class="sect__num">03</p>
+      <h2 id="h-install"><span lang="ru">Как поставить и как играть</span><span lang="en">Install and play</span></h2>
+      <p class="sect__intro">
+        <span lang="ru">Ставит каждый игрок, и хост, и друзья.</span>
+        <span lang="en">Every player installs it, the host and the friends.</span>
+      </p>
+    </header>
+
+    <ol class="steps">
+      <li class="panel step reveal">
+        <span class="step__n" aria-hidden="true">1</span>
+        <div lang="ru"><b>Скачайте</b> <code>KenshiKin_vXXXX.zip</code> со страницы <a href="https://github.com/Fisl-Gaming/KenshiKin/releases/latest">последнего стабильного релиза</a>.</div>
+        <div lang="en"><b>Download</b> <code>KenshiKin_vXXXX.zip</code> from the <a href="https://github.com/Fisl-Gaming/KenshiKin/releases/latest">latest stable release</a>.</div>
+      </li>
+      <li class="panel step reveal">
+        <span class="step__n" aria-hidden="true">2</span>
+        <div lang="ru"><b>Распакуйте</b> в <code>Kenshi\mods\</code>, чтобы получилось <code>Kenshi\mods\KenshiKin\KenshiKin.dll</code>.</div>
+        <div lang="en"><b>Unzip</b> it into <code>Kenshi\mods\</code>, so that you get <code>Kenshi\mods\KenshiKin\KenshiKin.dll</code>.</div>
+      </li>
+      <li class="panel step reveal">
+        <span class="step__n" aria-hidden="true">3</span>
+        <div lang="ru"><b>В лаунчере</b> Kenshi, вкладка «Моды»: включите <b>KenshiKin</b>, выключите <b>KenshiMP</b>, если он есть. Вместе они не работают.</div>
+        <div lang="en"><b>In the launcher</b>, Mods tab: tick <b>KenshiKin</b>, untick <b>KenshiMP</b> if you have it. They cannot run together.</div>
+      </li>
+      <li class="panel step reveal">
+        <span class="step__n" aria-hidden="true">4</span>
+        <div lang="ru"><b>У всех одинаково:</b> один и тот же релиз KenshiKin и один список модов в одном порядке. Иначе хост откажет в подключении и напишет, что отличается.</div>
+        <div lang="en"><b>Everyone the same:</b> the same KenshiKin release and the same mod list in the same order. Otherwise the host refuses the connection and says what differs.</div>
+      </li>
+    </ol>
+
+    <div class="note reveal">
+      <p lang="ru"><b>Нужно:</b> Kenshi из Steam (1.0.68, как ставит Steam), или GOG / 1.0.65 с <a href="https://www.nexusmods.com/kenshi/mods/847">RE_Kenshi</a>. Лучше играть в окне без рамки: полноэкранный режим ставит игру на паузу при Alt+Tab.</p>
+      <p lang="en"><b>You need:</b> Kenshi on Steam (1.0.68, as Steam installs it), or GOG / 1.0.65 with <a href="https://www.nexusmods.com/kenshi/mods/847">RE_Kenshi</a>. Borderless window mode is recommended: exclusive fullscreen pauses the game on Alt+Tab.</p>
+      <p lang="ru"><b>Сохранения:</b> у клиента они пишутся в <code>&lt;имя&gt;_MP</code>, ваши одиночные сохранения не трогаются. Хост сам делает копии сохранений (<code>backup_saves</code>). Настройки — в <code>%LOCALAPPDATA%\kenshi\KenshiKin\kenshikin.cfg</code>, каждая опция описана в самом файле.</p>
+      <p lang="en"><b>Saves:</b> client saves go to <code>&lt;name&gt;_MP</code>; your own single-player saves are never touched. The host backs up saves automatically (<code>backup_saves</code>). Settings live in <code>%LOCALAPPDATA%\kenshi\KenshiKin\kenshikin.cfg</code>; every option is explained in the file.</p>
+    </div>
+
+    <h3 class="sub reveal"><span lang="ru">Хост и друзья</span><span lang="en">Host and friends</span></h3>
+    <div class="play">
+      <div class="panel play__card reveal">
+        <h4 class="panel__title"><span lang="ru">Хост</span><span lang="en">Host</span></h4>
+        <p lang="ru">Титульный экран → <span class="ui">MULTIPLAYER</span> (или F4 в игре) → <span class="ui">HOST</span>, затем <span class="ui">STEAM FRIENDS</span> → <span class="ui">INVITE</span>. Новая игра или продолжение.</p>
+        <p lang="en">Title screen → <span class="ui">MULTIPLAYER</span> (or F4 in game) → <span class="ui">HOST</span>, then <span class="ui">STEAM FRIENDS</span> → <span class="ui">INVITE</span>. Start a new game or continue.</p>
+      </div>
+      <div class="panel play__card reveal">
+        <h4 class="panel__title"><span lang="ru">Друзья</span><span lang="en">Friends</span></h4>
+        <p lang="ru">Примите приглашение Steam (или «Присоединиться к игре» в профиле хоста), затем <span class="ui">NEW GAME</span> — лучше новая игра — или <span class="ui">CONTINUE</span>. <span class="ui">GO TO</span> в окне мультиплеера или <code>/goto</code> переносит отряд к хосту.</p>
+        <p lang="en">Accept the Steam invitation (or "Join game" on the host's profile), then <span class="ui">NEW GAME</span> — a fresh game is best — or <span class="ui">CONTINUE</span>. <span class="ui">GO TO</span> in the Multiplayer window, or <code>/goto</code>, brings your squad to the host.</p>
+      </div>
+      <div class="panel play__card reveal">
+        <h4 class="panel__title"><span lang="ru">Без Steam</span><span lang="en">Without Steam</span></h4>
+        <p lang="ru"><span class="ui">ADVANCED SETTINGS</span> → адрес хоста, порт (по умолчанию TCP 47000), пароль.</p>
+        <p lang="en"><span class="ui">ADVANCED SETTINGS</span> → host address, port (TCP 47000 by default), password.</p>
+      </div>
+    </div>
+
+    <div class="panel cmds reveal">
+      <h3 class="panel__title"><span lang="ru">Чат: Enter. Команды</span><span lang="en">Chat: Enter. Commands</span></h3>
+      <table class="cmds__table">
+        <tbody>
+          <tr><th scope="row"><code>/players</code></th><td><span lang="ru">кто в игре</span><span lang="en">who is playing</span></td></tr>
+          <tr><th scope="row"><code>/war &lt;<span lang="ru">игрок</span><span lang="en">player</span>|all&gt;</code></th><td><span lang="ru">война с игроком или со всеми</span><span lang="en">war with a player or everyone</span></td></tr>
+          <tr><th scope="row"><code>/peace &lt;<span lang="ru">игрок</span><span lang="en">player</span>|all&gt;</code></th><td><span lang="ru">мир</span><span lang="en">peace</span></td></tr>
+          <tr><th scope="row"><code>/ally &lt;<span lang="ru">игрок</span><span lang="en">player</span>|all&gt;</code></th><td><span lang="ru">союз</span><span lang="en">alliance</span></td></tr>
+          <tr><th scope="row"><code>/goto [<span lang="ru">игрок</span><span lang="en">player</span>]</code></th><td><span lang="ru">перенести выбранных персонажей (если никто не выбран — весь отряд) к игроку; клиенту без имени — к хосту. Не сработает в бою и к тому, с кем вы воюете</span><span lang="en">move your selected characters (the whole squad if none is selected) next to a player; for a client, no name means the host. Refused while fighting and towards a player you are at war with</span></td></tr>
+          <tr><th scope="row"><code>/resync [all|<span lang="ru">игрок</span><span lang="en">player</span>]</code></th><td><span lang="ru">пересинхронизация: без слов — себя, <code>all</code> или имя — у хоста</span><span lang="en">resync: alone — yourself; <code>all</code> or a name — on the host</span></td></tr>
+          <tr><th scope="row"><code>/console</code></th><td><span lang="ru">открыть окно хоста (только хост)</span><span lang="en">open the host console (host only)</span></td></tr>
+          <tr><th scope="row"><code>/report</code></th><td><span lang="ru">собрать отчёт об ошибке: папка на рабочем столе с логами и настройками</span><span lang="en">write a bug report: a folder on the desktop with the logs and settings</span></td></tr>
+        </tbody>
+      </table>
+      <p class="cmds__host">
+        <span lang="ru"><b>Окно хоста</b> — отдельное окно вне игры, свёрнуто в панель задач, когда вы хост: игроки, живой лог всех и команды <code>players</code>, <code>resync all</code>, <code>resync &lt;имя&gt;</code>, <code>say &lt;текст&gt;</code>.</span>
+        <span lang="en"><b>Host console</b> — a window outside the game, minimised in the taskbar when you host: the players, everyone's live log and the commands <code>players</code>, <code>resync all</code>, <code>resync &lt;name&gt;</code>, <code>say &lt;text&gt;</code>.</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 04 Known issues ============ -->
+  <section class="sect" id="issues" aria-labelledby="h-issues">
+    <header class="sect__head reveal">
+      <p class="sect__num">04</p>
+      <h2 id="h-issues"><span lang="ru">Известные проблемы</span><span lang="en">Known issues</span></h2>
+      <p class="sect__intro">
+        <span lang="ru">С чем можно столкнуться — сначала самое вероятное. Делайте копии сохранений.</span>
+        <span lang="en">Things you may run into, most likely first. Back up your saves.</span>
+      </p>
+    </header>
+
+    <ol class="panel issues reveal">
+      <li lang="ru"><b>У каждого игрока всё ещё свой мир.</b> Общее только то, что перечислено выше. Остальное может отличаться — например, содержимое сундуков на своей базе или то, что симулирует сам клиент вдали от хоста при <code>load_sharing=1</code>.</li>
+      <li lang="en"><b>Each player still has their own world.</b> Only what is listed above is shared. Anything else can differ — for example the contents of containers in your own base, or what a client's own simulation does far from the host with <code>load_sharing=1</code>.</li>
+      <li lang="ru"><b>Свой лут на земле у клиента заменяется лутом хоста.</b> Kenshi раскладывает лут случайно в каждом мире, поэтому вокруг персонажей клиента предметы на земле из его собственного мира убираются, а показываются предметы хоста (<code>world_ground=1</code>). Вещи рядом с постройками клиента и всё, что он выбросил сам, не трогаются никогда. <span class="tag">v1023 · тест</span></li>
+      <li lang="en"><b>A client's own ground loot is replaced by the host's.</b> Kenshi rolls loot at random in each world, so around a client's characters the items lying on the ground in its own world are removed and the host's are shown (<code>world_ground=1</code>). Items near the client's own buildings and anything it dropped itself are never removed. <span class="tag">v1023 · test</span></li>
+      <li lang="ru"><b>Разные моды — разные миры.</b> Если у кого-то нет мода с мебелью или предметами, у него будут пропавшие стулья, стоящие вместо сидящих NPC или предметы, которые не создаются. Ставьте одинаковые моды.</li>
+      <li lang="en"><b>Different mods = different worlds.</b> A missing furniture or item mod on one player's side shows up as missing chairs, NPCs standing instead of sitting, or items that cannot be created. Use the same mod list.</li>
+      <li lang="ru"><b>Стража реагирует на кражу с задержкой</b> (10–20 с в наших тестах): преступление ставится сразу, но NPC хоста ещё должны его заметить и подойти.</li>
+      <li lang="en"><b>Guards react to a theft after a delay</b> (10–20 s in our tests): the crime is set at once, but the host's NPCs still have to notice it and come.</li>
+      <li lang="ru"><b>Стража не узнаёт разыскиваемого друга в лицо.</b> Kenshi проверяет награды только у фракции игрока, а персонажи других игроков живут в своих фракциях. Преступление, пойманное на месте, работает.</li>
+      <li lang="en"><b>Guards do not recognise a wanted friend on sight.</b> Kenshi only checks bounties of the player faction; other players' characters live in their own factions. Crimes caught in the act work.</li>
+      <li lang="ru"><b>В игре ещё не проверены:</b> кровати и клетки, поза (ползёт, притворяется мёртвым), лечение чужого персонажа, взлом дверей клиентом, окно хоста. Они собраны и проверены офлайн — пишите, что увидите.</li>
+      <li lang="en"><b>Not tested in play yet:</b> beds and cages, posture (crawling, playing dead), healing another player, lockpicking reports, the host console window. They are built and tested offline; please report what you see.</li>
+      <li lang="ru"><b>Стрельба:</b> копия стреляет своей стрелой, когда стреляет владелец, поэтому траектория может отличаться (урон всегда считается у владельца).</li>
+      <li lang="en"><b>Ranged combat:</b> a copy fires its own arrow when its owner fires, so the arrow's path can differ (the damage is always the owner's).</li>
+      <li lang="ru"><b>Игра через интернет по TCP:</b> при плохом соединении персонажи могут подтормаживать и догонять рывками. Помогает Steam или игровой VPN (Radmin, ZeroTier, Tailscale).</li>
+      <li lang="en"><b>Internet play over TCP:</b> on a bad connection, characters can stutter or catch up in jumps. Steam or a gaming VPN (Radmin, ZeroTier, Tailscale) helps.</li>
+      <li lang="ru"><b>Если хост выходит, сессия заканчивается</b> у всех (передачи хоста нет).</li>
+      <li lang="en"><b>The host leaving ends the session</b> for everybody (no host migration).</li>
+      <li lang="ru"><b>Ускорение времени заблокировано на x1</b>, пока вы подключены.</li>
+      <li lang="en"><b>Fast-forward is locked to x1</b> while connected.</li>
+      <li lang="ru"><b>До 8 игроков; проверено втроём.</b></li>
+      <li lang="en"><b>Up to 8 players; tested with 3.</b></li>
+    </ol>
+
+    <div class="note note--alert reveal">
+      <p lang="ru"><b>Если что-то сломалось:</b> у хоста в <code>Kenshi\RE_Kenshi_log.txt</code> теперь есть строки всех игроков (<code>[имя] ...</code>). Откройте issue с этим файлом и коротким описанием, что вы видели.</p>
+      <p lang="en"><b>When something breaks:</b> the host's <code>Kenshi\RE_Kenshi_log.txt</code> now holds everybody's lines (<code>[name] ...</code>). Open an issue with that file and a short description of what you saw.</p>
+      <a class="btn btn--small" href="https://github.com/Fisl-Gaming/KenshiKin/issues"><span lang="ru">Issues на GitHub</span><span lang="en">Issues on GitHub</span></a>
+    </div>
+  </section>
+
+  <!-- ============ 05 Versions ============ -->
+  <section class="sect" id="versions" aria-labelledby="h-versions">
+    <header class="sect__head reveal">
+      <p class="sect__num">05</p>
+      <h2 id="h-versions"><span lang="ru">Версии</span><span lang="en">Versions</span></h2>
+      <p class="sect__intro">
+        <span lang="ru">Версия — это номер сетевого протокола, он виден в заголовке окна мультиплеера. Игроки на разных версиях вместе не играют: хост откажет в подключении.</span>
+        <span lang="en">The version is the network protocol number, shown in the Multiplayer window title. Players on different versions cannot play together: the host refuses the connection.</span>
+      </p>
+    </header>
+
+    <div class="rel">
+      <article class="panel rel__card reveal">
+        <h3 class="panel__title"><span lang="ru">Стабильная</span><span lang="en">Stable</span> <span class="rel__tag" data-rel="stable">v1022</span></h3>
+        <p lang="ru">Сборка, на которой играют. Если просто хотите поиграть с друзьями — вам сюда.</p>
+        <p lang="en">The build people play on. If you just want to play with friends, this is the one.</p>
+        <p class="rel__date" data-rel-date="stable"></p>
+        <a class="btn btn--main btn--small" href="https://github.com/Fisl-Gaming/KenshiKin/releases/latest"><span lang="ru">Скачать стабильную</span><span lang="en">Download stable</span></a>
+      </article>
+      <article class="panel rel__card reveal">
+        <h3 class="panel__title"><span lang="ru">Тестовая</span><span lang="en">Test</span> <span class="rel__tag rel__tag--pre" data-rel="pre">v1023</span></h3>
+        <p lang="ru">Новые исправления до проверки в игре. Ставьте, если готовы ловить баги и прислать логи, — и только всей компанией сразу.</p>
+        <p lang="en">New fixes before they are tested in play. Take it if you are ready to catch bugs and send logs — and only as a whole group.</p>
+        <p class="rel__date" data-rel-date="pre"></p>
+        <a class="btn btn--ghost-dark btn--small" href="https://github.com/Fisl-Gaming/KenshiKin/releases"><span lang="ru">Все релизы</span><span lang="en">All releases</span></a>
+      </article>
+    </div>
+
+    <div class="note reveal">
+      <p lang="ru"><b>Что такое Pre-release.</b> На странице релизов тестовые сборки помечены меткой <span class="ui">Pre-release</span>. Это версии для проверки: в них новые исправления, которые ещё не прошли игровые сессии. Когда сборку проверили в игре, метку снимают, и она становится стабильной — ссылка «Скачать» всегда ведёт на последнюю стабильную.</p>
+      <p lang="en"><b>What Pre-release means.</b> On the releases page, test builds carry the <span class="ui">Pre-release</span> label. They are builds for checking: new fixes that have not been through play sessions yet. Once a build has been tested in play, the label comes off and it becomes the stable one — the Download link always leads to the latest stable release.</p>
+    </div>
+
+    <div class="log reveal">
+      <h3 class="sub"><span lang="ru">Журнал изменений</span><span lang="en">Changelog</span></h3>
+      <div class="log__entry">
+        <p class="log__ver">v1023 <span class="tag"><span lang="ru">тест</span><span lang="en">test</span></span></p>
+        <ul lang="ru">
+          <li>Общая земля хоста: предметы на земле в мире хоста вокруг клиента видны ему на том же месте, их можно подобрать; свой случайный лут клиента вокруг его персонажей убирается.</li>
+          <li>Рюкзаки на земле делят содержимое: что взяли или положили, проверяет владелец рюкзака и видят все.</li>
+          <li>Городские ящики в зонах, не загруженных у хоста, хост подгружает и присылает содержимое.</li>
+        </ul>
+        <ul lang="en">
+          <li>The host's ground is shared: items on the ground in the host's world around a client show up for that client at the same spot and can be picked up; the client's own random ground loot around its characters is removed.</li>
+          <li>Bags on the ground share their content: what is taken or put in is validated by the bag's owner and seen by everybody.</li>
+          <li>Town containers in zones the host has not loaded are loaded by the host, and their content is sent.</li>
+        </ul>
+      </div>
+      <div class="log__entry">
+        <p class="log__ver">v1022 <span class="tag tag--plain"><span lang="ru">первый публичный релиз</span><span lang="en">first public release</span></span></p>
+        <ul lang="ru">
+          <li>На основе KenshiMP v18: присед, мебель и свет, жизнь города, двери и ворота, нокауты и смерти решает владелец, переноска тел, лечение, поза, кровати и клетки, кражи и преступления.</li>
+          <li>Диагностика: логи клиентов у хоста, окно хоста, RESYNC.</li>
+          <li>Стабильность: хуки движка только записывают события, а обрабатывает их главный цикл; меньше работы каждый кадр.</li>
+          <li>KenshiKin не запускается рядом с KenshiMP.</li>
+        </ul>
+        <ul lang="en">
+          <li>Built on KenshiMP v18: sneaking, furniture and lights, town life, doors and gates, owner-decided knock-outs and deaths, carrying bodies, healing, posture, beds and cages, thefts and crimes.</li>
+          <li>Diagnostics: clients' logs on the host, host console, RESYNC.</li>
+          <li>Stability: engine hooks only record events and the main loop handles them; lighter per-frame work.</li>
+          <li>KenshiKin refuses to start next to KenshiMP.</li>
+        </ul>
+      </div>
+      <p><a href="https://github.com/Fisl-Gaming/KenshiKin/blob/main/CHANGELOG.md"><span lang="ru">Полный CHANGELOG.md</span><span lang="en">Full CHANGELOG.md</span></a></p>
+    </div>
+  </section>
+</main>
+
+<!-- ============ Footer ============ -->
+<footer class="foot">
+  <div class="foot__in">
+    <div class="foot__col">
+      <p class="foot__brand">KenshiKin</p>
+      <p>
+        <span lang="ru">Свободное ПО под лицензией <a href="https://github.com/Fisl-Gaming/KenshiKin/blob/main/LICENSE">GPL-3.0</a>, как KenshiMP и KenshiLib.</span>
+        <span lang="en">Free software under the <a href="https://github.com/Fisl-Gaming/KenshiKin/blob/main/LICENSE">GPL-3.0</a>, like KenshiMP and KenshiLib.</span>
+      </p>
+      <p class="foot__links">
+        <a href="https://github.com/Fisl-Gaming/KenshiKin">GitHub</a>
+        <a href="https://github.com/Fisl-Gaming/KenshiKin/releases"><span lang="ru">Релизы</span><span lang="en">Releases</span></a>
+        <a href="https://github.com/Fisl-Gaming/KenshiKin/issues">Issues</a>
+      </p>
+    </div>
+    <div class="foot__col">
+      <h2 class="foot__h"><span lang="ru">Благодарности</span><span lang="en">Credits</span></h2>
+      <ul>
+        <li><a href="https://github.com/xemou/KenshiMP">xemou/KenshiMP</a> — <span lang="ru">мод, на котором построен форк</span><span lang="en">the mod this fork is built on</span></li>
+        <li><a href="https://github.com/BFrizzleFoShizzle">KenshiLib / RE_Kenshi</a> — <span lang="ru">доступ к движку</span><span lang="en">engine access</span></li>
+        <li><a href="https://github.com/nhoral/KenshiCoop">nhoral/KenshiCoop</a>, <a href="https://github.com/Melaus123/Shared-Wastelands">Shared-Wastelands</a>, <a href="https://github.com/LRaverdy/KenshiCoop">LRaverdy/KenshiCoop</a> — <span lang="ru">подходы, написанные заново, без копирования кода</span><span lang="en">approaches, re-implemented, no code copied</span></li>
+      </ul>
+    </div>
+    <div class="foot__col foot__legal">
+      <p>
+        <span lang="ru">KenshiKin — неофициальный фанатский проект, не связанный с Lo-Fi Games, авторами KenshiMP или Anthropic. <i>Kenshi</i> — товарный знак Lo-Fi Games.</span>
+        <span lang="en">KenshiKin is an unofficial fan project, not affiliated with Lo-Fi Games, the KenshiMP authors or Anthropic. <i>Kenshi</i> is a trademark of Lo-Fi Games.</span>
+      </p>
+      <p>
+        <span lang="ru">Вся графика сайта нарисована кодом для этого сайта; материалов игры здесь нет.</span>
+        <span lang="en">All artwork on this site is drawn in code for it; no game materials are used.</span>
+      </p>
+    </div>
+  </div>
+</footer>
+
+<canvas class="trail" aria-hidden="true"></canvas>
+<script src="script.js" defer></script>
+</body>
+</html>
